@@ -4,7 +4,6 @@ namespace DaSie\Openaiassistant\Enums;
 
 enum RequestMode: string
 {
-
     case json = 'json';
     case text = 'text';
 

@@ -21,6 +21,7 @@ class Assistant extends Model implements HasMedia
     protected $guarded = [];
 
     protected OpenAiHelper $openAiHelper;
+
     protected $casts = [];
 
     public function __construct(array $attributes = [])
@@ -44,7 +45,7 @@ class Assistant extends Model implements HasMedia
         $this->addMediaCollection('upload');
     }
 
-    public function registerMediaConversions(Media $media = null): void
+    public function registerMediaConversions(?Media $media = null): void
     {
         $this
             ->addMediaConversion('preview')
@@ -52,20 +53,20 @@ class Assistant extends Model implements HasMedia
             ->nonQueued();
     }
 
-
     public function initialize($prePrompt = null): Assistant
     {
         $this->openAiHelper = new OpenAiHelper();
         $this->openAiHelper->assistant = $this;
         $this->openAiHelper->initialize($prePrompt ?? RequestMode::from($this->request_mode)->prePrompt());
         $this->save();
+
         return $this;
     }
 
     public function sendMessage($message, $responseType = 'text'): void
     {
 
-        if (!$this->assistant_id || !$this->thread_id) {
+        if (! $this->assistant_id || ! $this->thread_id) {
             throw new \Exception('Assistant not initialized');
         }
 
@@ -83,7 +84,7 @@ class Assistant extends Model implements HasMedia
             'message_id' => $this->openAiHelper->currentMessageId,
             'run_id' => $this->openAiHelper->runId,
             'run_status' => 'pending',
-            'response_type' => $responseType
+            'response_type' => $responseType,
         ]);
 
         event(new OpenAiRequestEvent($message->id));
@@ -109,7 +110,7 @@ class Assistant extends Model implements HasMedia
         }
 
         $this->messages()->delete();
+
         return parent::delete();
     }
-
 }

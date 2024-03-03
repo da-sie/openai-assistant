@@ -14,6 +14,7 @@ class Message extends Model
         parent::__construct($attributes);
         $this->setTable(config('openai-assistant.table.messages'));
     }
+
     protected function assistant(): BelongsTo
     {
         return $this->belongsTo(Assistant::class);

@@ -3,8 +3,8 @@
 namespace DaSie\Openaiassistant\Listeners;
 
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
-use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
+use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
 use DaSie\Openaiassistant\Helpers\OpenAiHelper;
 
 class OpenAiRequestListener
@@ -17,7 +17,6 @@ class OpenAiRequestListener
     {
         $message = $event->message;
         $assistant = $message->assistant;
-
 
         $api = new OpenAiHelper();
         $api->assistantId = $assistant->assistant_id;
@@ -54,8 +53,9 @@ class OpenAiRequestListener
     private function validateResponse($message, $response)
     {
         if ($message->response_type == 'json') {
-            $response = str_replace(["```json", "```"], [], $response);
+            $response = str_replace(['```json', '```'], [], $response);
         }
+
         return $response;
     }
 }

@@ -2,8 +2,8 @@
 
 namespace DaSie\Openaiassistant\Events;
 
-use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -19,7 +19,7 @@ class AssistantUpdatedEvent implements ShouldBroadcast
     public function broadcastOn(): array
     {
         return [
-            new Channel('ai_assistant_update.' . $this->uuid),
+            new Channel('ai_assistant_update.'.$this->uuid),
         ];
     }
 

@@ -3,7 +3,6 @@
 namespace DaSie\Openaiassistant\Traits;
 
 use DaSie\Openaiassistant\Models\Assistant;
-use function PHPUnit\Framework\isJson;
 
 trait WithAssistants
 {
@@ -19,16 +18,15 @@ trait WithAssistants
 
     private function sanitizeContent($content): string
     {
-        return (!is_string($content)) ? json_encode($content) : $content;
+        return (! is_string($content)) ? json_encode($content) : $content;
     }
 
     public function generateAssistant($data = [])
     {
 
-        if(!is_array($data)) {
+        if (! is_array($data)) {
             throw new \Exception('When generating assistant, data parameter must be type of array');
         }
-
 
         if (isset($data['content'])) {
             $data['content'] = $this->sanitizeContent($data['content']);
@@ -40,7 +38,7 @@ trait WithAssistants
             $data['request_mode'] = 'text';
         }
 
-        $data = array_merge(['uuid' => (string)\Str::uuid(), 'status' => 'initialized'], $data);
+        $data = array_merge(['uuid' => (string) \Str::uuid(), 'status' => 'initialized'], $data);
 
         return $this->assistants()->create($data);
     }
@@ -49,5 +47,4 @@ trait WithAssistants
     {
         return $this->assistants()->exists();
     }
-
 }

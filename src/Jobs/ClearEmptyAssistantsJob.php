@@ -2,7 +2,6 @@
 
 namespace DaSie\Openaiassistant\Jobs;
 
-use App\Models\Upload;
 use DaSie\Openaiassistant\Models\Assistant;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;

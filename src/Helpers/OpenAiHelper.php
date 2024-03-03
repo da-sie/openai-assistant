@@ -12,9 +12,13 @@ class OpenAiHelper
     public $response;
 
     public $client;
+
     public string $engine = '';
+
     public string $currentMessageId = '';
+
     public string $runId = '';
+
     private string $filePath;
 
     public Assistant $assistant;
@@ -22,7 +26,7 @@ class OpenAiHelper
     public function __construct($engine = null)
     {
         $this->client = \OpenAI::client(config('openai.api_key'));
-        if (!$engine) {
+        if (! $engine) {
             $this->engine = config('openai-assistant.assistant.engine');
         }
     }
@@ -40,10 +44,10 @@ class OpenAiHelper
                 'name' => 'Assistant',
                 'tools' => [
                     [
-                        'type' => 'retrieval'
-                    ]
+                        'type' => 'retrieval',
+                    ],
                 ],
-                'model' => $this->engine
+                'model' => $this->engine,
             ]);
             $this->assistant->assistant_id = $assistant->id;
             $this->assistant->save();
@@ -68,7 +72,7 @@ class OpenAiHelper
     {
         $response = $this->client->files()->upload([
             'purpose' => 'assistants',
-            'file' => fopen($path, 'r')
+            'file' => fopen($path, 'r'),
         ]);
         $fileId = $response->id;
 
@@ -76,7 +80,7 @@ class OpenAiHelper
             ->assistants()
             ->files()
             ->create($this->assistant->assistant_id, [
-                'file_id' => $fileId
+                'file_id' => $fileId,
             ]);
     }
 
@@ -87,7 +91,7 @@ class OpenAiHelper
             ->messages()
             ->create($this->assistant->thread_id, [
                 'role' => 'user',
-                'content' => $message
+                'content' => $message,
             ]);
         $this->currentMessageId = $response->id;
         $this->run();
@@ -101,7 +105,7 @@ class OpenAiHelper
             ->create(
                 threadId: $this->assistant->thread_id,
                 parameters: [
-                    'assistant_id' => $this->assistant->assistant_id
+                    'assistant_id' => $this->assistant->assistant_id,
                 ]
             );
         $this->runId = $response->id;
@@ -109,11 +113,11 @@ class OpenAiHelper
 
     public function initialize(string $prePrompt): void
     {
-        if (!$this->assistant->assistant_id) {
+        if (! $this->assistant->assistant_id) {
             $this->createAssistant($prePrompt);
         }
 
-        if (!$this->assistant->thread_id) {
+        if (! $this->assistant->thread_id) {
             $this->createThread();
 
             $this->saveContentToFile();
@@ -135,7 +139,7 @@ class OpenAiHelper
                 threadId: $this->threadId,
                 runId: $runId,
                 parameters: [
-                    'limit' => 10
+                    'limit' => 10,
                 ]
             );
     }
@@ -146,7 +150,7 @@ class OpenAiHelper
             ->threads()
             ->messages()
             ->list($this->threadId, [
-                'limit' => 10
+                'limit' => 10,
             ]);
     }
 
@@ -156,14 +160,13 @@ class OpenAiHelper
         if (count($messages->data) == 0) {
             return '';
         }
+
         return $messages->data[0]->content[0]->text->value;
     }
 
     private function saveContentToFile(): void
     {
-        $this->filePath = storage_path('app/public/' . $this->assistant->uuid . '.' . (RequestMode::from($this->assistant->request_mode))->file_extension());
+        $this->filePath = storage_path('app/public/'.$this->assistant->uuid.'.'.(RequestMode::from($this->assistant->request_mode))->file_extension());
         file_put_contents($this->filePath, $this->assistant->content);
     }
-
 }
-
