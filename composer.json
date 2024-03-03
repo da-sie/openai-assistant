@@ -31,13 +31,13 @@
     },
     "autoload": {
         "psr-4": {
-            "DaSie\\OpenaiAssistant\\": "src/",
-            "DaSie\\OpenaiAssistant\\Database\\Factories\\": "database/factories/"
+            "DaSie\\Openaiassistant\\": "src/",
+            "DaSie\\Openaiassistant\\Database\\Factories\\": "database/factories/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "DaSie\\OpenaiAssistant\\Tests\\": "tests/",
+            "DaSie\\Openaiassistant\\Tests\\": "tests/",
             "Workbench\\App\\": "workbench/app/"
         }
     },
@@ -69,10 +69,10 @@
     "extra": {
         "laravel": {
             "providers": [
-                "DaSie\\OpenaiAssistant\\OpenaiAssistantServiceProvider"
+                "DaSie\\Openaiassistant\\OpenaiAssistantServiceProvider"
             ],
             "aliases": {
-                "OpenaiAssistant": "DaSie\\OpenaiAssistant\\Facades\\OpenaiAssistant"
+                "OpenaiAssistant": "DaSie\\Openaiassistant\\Facades\\OpenaiAssistant"
             }
         }
     },
