@@ -22,4 +22,11 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
             ->hasMigration('create_openai_assistant_table')
             ->hasCommand(OpenaiAssistantCommand::class);
     }
+
+
+    public function packageBooted()
+    {
+        $this->app->register(\DaSie\Openaiassistant\Providers\EventServiceProvider::class);
+    }
+
 }
