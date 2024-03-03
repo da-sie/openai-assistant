@@ -1,6 +1,6 @@
 <?php
 
-namespace DaSie\OpenaiAssistant\Commands;
+namespace DaSie\Openaiassistant\Commands;
 
 use Illuminate\Console\Command;
 

@@ -1,6 +1,6 @@
 <?php
 
-namespace DaSie\OpenaiAssistant;
+namespace DaSie\Openaiassistant;
 
 class OpenaiAssistant
 {

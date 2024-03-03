@@ -1,6 +1,6 @@
 <?php
 
-namespace DaSie\OpenaiAssistant\Database\Factories;
+namespace DaSie\Openaiassistant\Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
 

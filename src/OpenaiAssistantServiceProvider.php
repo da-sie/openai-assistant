@@ -1,8 +1,8 @@
 <?php
 
-namespace DaSie\OpenaiAssistant;
+namespace DaSie\Openaiassistant;
 
-use DaSie\OpenaiAssistant\Commands\OpenaiAssistantCommand;
+use DaSie\Openaiassistant\Commands\OpenaiAssistantCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
