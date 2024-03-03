@@ -5,15 +5,6 @@
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/da-sie/openai-assistant/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/da-sie/openai-assistant/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
 [![Total Downloads](https://img.shields.io/packagist/dt/da-sie/openai-assistant.svg?style=flat-square)](https://packagist.org/packages/da-sie/openai-assistant)
 
-This is where your description should go. Limit it to a paragraph or two. Consider adding a small example.
-
-## Support us
-
-[<img src="https://github-ads.s3.eu-central-1.amazonaws.com/openai-assistant.jpg?t=1" width="419px" />](https://spatie.be/github-ad-click/openai-assistant)
-
-We invest a lot of resources into creating [best in class open source packages](https://spatie.be/open-source). You can support us by [buying one of our paid products](https://spatie.be/open-source/support-us).
-
-We highly appreciate you sending us a postcard from your hometown, mentioning which of our package(s) you are using. You'll find our address on [our contact page](https://spatie.be/about-us). We publish all received postcards on [our virtual postcard wall](https://spatie.be/open-source/postcards).
 
 ## Installation
 
@@ -40,42 +31,28 @@ This is the contents of the published config file:
 
 ```php
 return [
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'api_org' => env('OPENAI_ORGANIZATION'),
+    ],
+    'assistant' => [
+        'engine' => env('OPENAI_ASSISTANT_ENGINE', 'gpt-3.5-turbo-0125'),
+    ],
+    'table' => [
+        'assistants' => 'ai_assistants',
+        'messages' => 'ai_messages',
+    ],
 ];
-```
-
-Optionally, you can publish the views using
-
-```bash
-php artisan vendor:publish --tag="openai-assistant-views"
 ```
 
 ## Usage
 
 ```php
-
+//@todo:    Add usage instructions :)
 ```
-
-## Testing
-
-```bash
-composer test
-```
-
-## Changelog
-
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
-
-## Contributing
-
-Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
-
-## Security Vulnerabilities
-
-Please review [our security policy](../../security/policy) on how to report security vulnerabilities.
-
 ## Credits
 
-- [PRzemek Jaskulski](https://github.com/da-sie)
+- [Przemek Jaskulski](https://github.com/da-sie)
 - [All Contributors](../../contributors)
 
 ## License
