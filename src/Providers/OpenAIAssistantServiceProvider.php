@@ -3,6 +3,7 @@
 namespace DaSie\Openaiassistant\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Spatie\LaravelPackageTools\Commands\InstallCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Spatie\MediaLibrary\Conversions\Commands\RegenerateCommand;
@@ -17,7 +18,16 @@ class OpenAIAssistantServiceProvider extends PackageServiceProvider
         $package
             ->name('openai-assistant')
             ->hasConfigFile('openai-assistant')
-            ->hasMigration('create_assistant_table');
+            ->hasMigration('create_assistant_table')
+            ->publishesServiceProvider('EventServiceProvider')
+            ->hasInstallCommand(function (InstallCommand $command) {
+                $command
+                    ->publishConfigFile()
+                    ->publishMigrations()
+                    ->askToRunMigrations()
+                    ->copyAndRegisterServiceProviderInApp()
+                    ->askToStarRepoOnGitHub('da-sie/openai-assistant');
+            });
     }
 
     public function packageRegistered()
