@@ -11,5 +11,5 @@ return [
     'table' => [
         'assistants' => 'ai_assistants',
         'messages' => 'ai_messages',
-    ]
+    ],
 ];
