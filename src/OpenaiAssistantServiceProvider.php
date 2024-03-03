@@ -19,7 +19,7 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
             ->name('openai-assistant')
             ->hasConfigFile()
             ->hasViews()
-            ->hasMigration('create_openai-assistant_table')
+            ->hasMigration('create_openai_assistant_table')
             ->hasCommand(OpenaiAssistantCommand::class);
     }
 }
