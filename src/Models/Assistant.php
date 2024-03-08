@@ -2,27 +2,19 @@
 
 namespace DaSie\Openaiassistant\Models;
 
-use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Enums\RequestMode;
-use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
-use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
-use DaSie\Openaiassistant\Helpers\OpenAiHelper;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Spatie\Image\Enums\Fit;
-use Spatie\MediaLibrary\HasMedia;
-use Spatie\MediaLibrary\InteractsWithMedia;
-use Spatie\MediaLibrary\MediaCollections\Models\Media;
+use Illuminate\Support\Facades\Log;
 
-class Assistant extends Model implements HasMedia
+class Assistant extends Model
 {
-    use InteractsWithMedia;
-
-    protected $guarded = [];
-
-    protected OpenAiHelper $openAiHelper;
-
-    protected $casts = [];
+    protected $fillable = [
+        'openai_assistant_id',
+        'name',
+        'instructions',
+        'engine',
+    ];
 
     public function __construct(array $attributes = [])
     {
@@ -30,9 +22,65 @@ class Assistant extends Model implements HasMedia
         $this->setTable(config('openai-assistant.table.assistants'));
     }
 
-    public function assistable()
+    protected static function booted()
     {
-        return $this->morphTo();
+        static::updated(function ($assistant) {
+            try {
+                $client = \OpenAI::client(config('openai.api_key'));
+                $client->assistants()->modify($assistant->openai_assistant_id, [
+                    'name' => $assistant->name,
+                    'instructions' => $assistant->instructions,
+                    'model' => $assistant->engine,
+                ]);
+                // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
+            } catch (\Exception $e) {
+                ray($e->getMessage());
+                Log::error($e->getMessage());
+            }
+        });
+
+        static::deleted(function ($assistant) {
+            try {
+                $client = \OpenAI::client(config('openai.api_key'));
+                $response = $client
+                    ->assistants()
+                    ->files()
+                    ->list($assistant->openai_assistant_id);
+                foreach ($response->data as $result) {
+                    $client
+                        ->assistants()
+                        ->files()
+                        ->delete(assistantId: $assistant->openai_assistant_id, fileId: $result->id);
+                }
+                $client->assistants()->delete($assistant->openai_assistant_id);
+            } catch (\Exception $e) {
+                ray($e->getMessage());
+                Log::error($e->getMessage());
+            }
+        });
+
+        static::created(function ($assistant) {
+            try {
+                $client = \OpenAI::client(config('openai.api_key'));
+                $assistantModel = $client->assistants()->create([
+                    'instructions' => $assistant->instructions,
+                    'name' => $assistant->name,
+                    'tools' => [
+                        [
+                            'type' => 'retrieval',
+                        ],
+                    ],
+                    'model' => $assistant->engine,
+                ]);
+
+                $assistant->openai_assistant_id = $assistantModel->id;
+                $assistant->saveQuietly();
+                // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
+            } catch (\Exception $e) {
+                $assistant->delete();
+                Log::error($e->getMessage());
+            }
+        });
     }
 
     public function messages(): HasMany
@@ -40,77 +88,14 @@ class Assistant extends Model implements HasMedia
         return $this->hasMany(Message::class);
     }
 
-    public function registerMediaCollections(): void
+    public function threads(): HasMany
     {
-        $this->addMediaCollection('upload');
+        return $this->hasMany(Thread::class);
     }
 
-    public function registerMediaConversions(?Media $media = null): void
+    public function files(): HasMany
     {
-        $this
-            ->addMediaConversion('preview')
-            ->fit(Fit::Contain, 600, 600)
-            ->nonQueued();
+        return $this->hasMany(File::class);
     }
 
-    public function initialize($prePrompt = null): Assistant
-    {
-        $this->openAiHelper = new OpenAiHelper();
-        $this->openAiHelper->assistant = $this;
-        $this->openAiHelper->initialize($prePrompt ?? RequestMode::from($this->request_mode)->prePrompt());
-        $this->save();
-
-        return $this;
-    }
-
-    public function sendMessage($message, $responseType = 'text'): void
-    {
-
-        if (! $this->assistant_id || ! $this->thread_id) {
-            throw new \Exception('Assistant not initialized');
-        }
-
-        if ($this->openAiHelper->assistantId == null) {
-            $this->openAiHelper = new OpenAiHelper();
-            $this->openAiHelper->assistant = $this;
-        }
-
-        event(new AssistantUpdatedEvent($this->uuid, ['steps' => ['processed_ai' => CheckmarkStatus::processing]]));
-
-        $this->openAiHelper->sendMessage($message);
-
-        $message = $this->messages()->create([
-            'prompt' => $message,
-            'message_id' => $this->openAiHelper->currentMessageId,
-            'run_id' => $this->openAiHelper->runId,
-            'run_status' => 'pending',
-            'response_type' => $responseType,
-        ]);
-
-        event(new OpenAiRequestEvent($message->id));
-    }
-
-    public function delete()
-    {
-        $api = \OpenAI::client(config('openai.api_key'));
-
-        if ($this->assistant_id) {
-            try {
-                $response = $api->assistants()->files()->list($this->assistant_id);
-                foreach ($response->data as $result) {
-                    $api->assistants()->files()->delete(
-                        assistantId: $this->assistant_id,
-                        fileId: $result->id
-                    );
-                }
-                $api->assistants()->delete($this->assistant_id);
-            } catch (\Exception $e) {
-                \Log::error($e->getMessage());
-            }
-        }
-
-        $this->messages()->delete();
-
-        return parent::delete();
-    }
 }

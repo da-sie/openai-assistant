@@ -10,25 +10,41 @@ return new class extends Migration
     {
         Schema::create(config('openai-assistant.table.assistants'), function (Blueprint $table) {
             $table->id();
+            $table->string('name')->unique();
+            $table->longText('instructions')->nullable();
+            $table->string('engine')->nullable();
+            $table->string('openai_assistant_id')->nullable();
+            $table->timestamps();
+        });
+
+         Schema::create(config('openai-assistant.table.threads'), function (Blueprint $table) {
+            $table->id();
             $table->morphs('model');
-            $table->string('request_mode')->nullable();
             $table->uuid('uuid')->nullable()->unique();
-            $table->longText('content')->nullable();
-            $table->string('assistant_id')->nullable();
-            $table->string('thread_id')->nullable();
+            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'));
+            $table->string('openai_thread_id')->nullable();
             $table->string('status')->default('pending');
+            $table->timestamps();
+        });
+
+        Schema::create(config('openai-assistant.table.files'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'));
+            $table->foreignId('thread_id')->constrained(config('openai-assistant.table.threads'));
+            $table->string('openai_file_id')->nullable();
             $table->timestamps();
         });
 
         Schema::create(config('openai-assistant.table.messages'), function (Blueprint $table) {
             $table->id();
             $table->string('response_type');
-            $table->string('run_id')->nullable();
+            $table->string('openai_message_id')->nullable();
+            $table->string('openai_run_id')->nullable();
             $table->string('run_status')->nullable();
-            $table->string('message_id')->nullable();
             $table->text('prompt')->nullable();
             $table->text('response')->nullable();
-            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'));
+            $table->foreignId('thread_id')->constrained(config('openai-assistant.table.threads'));
+            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'))->nullable();;
             $table->timestamps();
         });
     }

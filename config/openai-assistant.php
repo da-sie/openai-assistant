@@ -10,6 +10,8 @@ return [
     ],
     'table' => [
         'assistants' => 'ai_assistants',
+        'files' => 'ai_files',
+        'threads' => 'ai_threads',
         'messages' => 'ai_messages',
     ],
 ];

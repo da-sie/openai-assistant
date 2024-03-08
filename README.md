@@ -1,10 +1,15 @@
-# This component facilitates the generation of an OpenAI assistant, along with a data file enabling the assistant to be linked with a specific context.
+# Open AI Model assistant
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/da-sie/openai-assistant.svg?style=flat-square)](https://packagist.org/packages/da-sie/openai-assistant)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/da-sie/openai-assistant/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/da-sie/openai-assistant/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/da-sie/openai-assistant/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/da-sie/openai-assistant/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
 [![Total Downloads](https://img.shields.io/packagist/dt/da-sie/openai-assistant.svg?style=flat-square)](https://packagist.org/packages/da-sie/openai-assistant)
 
+This package acts as a specialized wrapper for the OpenAI API, tailored specifically for Laravel, to facilitate the seamless integration of AI assistants into Laravel projects. It simplifies the creation and management of AI conversations, which can be effortlessly linked to Laravel models. Additionally, it is equipped to generate events for each sent and received message, streamlining the logging and monitoring of interactions.
+
+It also offers conversation scoping capabilities, allowing you to refine the context and direction of interactions based on specific needs, using either text or JSON to limit the conversation's scope. This functionality enhances the ability to customize and fine-tune AI conversations within Laravel applications, ensuring they are more pertinent and focused.
+
+Think it sounds complex? On the contrary, it introduces a world of exciting possibilities! :)
 
 ## Installation
 
@@ -50,6 +55,7 @@ return [
 ```php
 //@todo:    Add usage instructions :)
 ```
+
 ## Credits
 
 - [Przemek Jaskulski](https://github.com/da-sie)
