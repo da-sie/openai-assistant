@@ -44,7 +44,7 @@ return new class extends Migration
             $table->text('prompt')->nullable();
             $table->text('response')->nullable();
             $table->foreignId('thread_id')->constrained(config('openai-assistant.table.threads'));
-            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'))->nullable();;
+            $table->foreignId('assistant_id')->constrained(config('openai-assistant.table.assistants'))->nullable();
             $table->timestamps();
         });
     }

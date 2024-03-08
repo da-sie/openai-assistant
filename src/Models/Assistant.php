@@ -1,8 +1,7 @@
 <?php
 
 namespace DaSie\Openaiassistant\Models;
-
-use DaSie\Openaiassistant\Enums\RequestMode;
+;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Log;

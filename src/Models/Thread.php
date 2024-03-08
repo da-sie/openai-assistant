@@ -38,6 +38,15 @@ class Thread extends Model
         return $this->hasMany(File::class);
     }
 
+    /**
+     * @throws \Exception
+     */
+    public function scope($content): File
+    {
+        $path = $this->saveContentToFile($content);
+        return $this->attachFile($path);
+    }
+
     protected static function booted()
     {
         static::updated(function ($thread) {
