@@ -26,12 +26,27 @@ class Message extends Model
                 $message->load('thread');
 
                 $messageParams = [
-                    'role' => 'user',
-                    'content' => $message->prompt
+                    'role' => 'user'
                 ];
 
-                if ($message->thread->files) {
+                switch ($message->response_type) {
+                    case 'html':
+                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie kod html - zacznij odpowiedź od <p>, zakończ na </p>. Akceptowane tagi: p, span, strong, br. Nie używaj markdownu.';
+                        break;
+                    case 'markdown':
+                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie markdown - zacznij odpowiedź od #, zakończ na #. Akceptowane tagi: #, ##, ###, ####, **, *, __, ~~. Nie używaj html.';
+                        break;
+                    case 'json':
+                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie json.';
+                        break;
+                    default:
+                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie tekst.';
+                        break;
+                }
+
+                if ($message->thread->files->count() > 0) {
                     $messageParams['file_ids'] = $message->thread->files->pluck('openai_file_id')->toArray();
+                    $messageParams['content'] = $messageParams['content'] . ' Odpowiedź oprzyj wyłącznie na załączonych plikach.';
                 }
 
                 $response = $client
@@ -40,6 +55,7 @@ class Message extends Model
                     ->create(
                         threadId: $message->thread->openai_thread_id,
                         parameters: $messageParams);
+
                 $message->openai_message_id = $response->id;
                 $message->assistant_id = $message->thread->assistant_id;
                 $message->run_status = 'pending';

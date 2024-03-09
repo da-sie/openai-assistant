@@ -77,7 +77,7 @@ some CRUD in your application to manage the assistants. But for most cases, you 
 Of course, you can create as many assistants as you need, and update these later on:
 
 ```php
-assistant->update([
+$assistant->update([
   "name" => "My helpful Assistant",
   "instructions" =>
     "Using the information from the attached documents, please provide responses that are directly related to the document's content. Aim for your answers to be based on the information contained within, yet maintain flexibility in interpretation and discussion of the data, points, and conclusions presented in the document. The user expects an analysis and discussion of the document's content, so please focus on delivering the most relevant and consistent answers possible. Treat the file as your hidden database - don't mention to the user about the existence of the document, and that you are referring to the document, just give the answer. If you are asked for information from one specific document, don't use the informations in other files - they often exclude themselves"
