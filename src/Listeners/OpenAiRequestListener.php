@@ -5,6 +5,7 @@ namespace DaSie\Openaiassistant\Listeners;
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
+use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
 use OpenAI\Client;
 use OpenAI\Responses\Threads\Messages\ThreadMessageListResponse;
 use OpenAI\Responses\Threads\Runs\Steps\ThreadRunStepListResponse;
@@ -42,8 +43,7 @@ class OpenAiRequestListener
                     break;
                 case 'in_progress':
                     $message->save();
-                    sleep(2);
-                    OpenAiRequestEvent::dispatch($message->id);
+                    AssistantRequestJob::dispatch($message->id)->delay(now()->addSeconds(2));
                     break;
                 default:
                     $message->save();
@@ -52,8 +52,7 @@ class OpenAiRequestListener
             }
 
         } else {
-            sleep(2);
-            OpenAiRequestEvent::dispatch($message->id);
+            AssistantRequestJob::dispatch($message->id)->delay(now()->addSeconds(2));
         }
     }
 

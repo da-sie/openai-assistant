@@ -5,6 +5,7 @@ namespace DaSie\Openaiassistant\Models;
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
+use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -85,7 +86,7 @@ class Message extends Model
         $message->openai_run_id = $response->id;
         $message->saveQuietly();
 
-        event(new OpenAiRequestEvent($message->id));
+        AssistantRequestJob::dispatch($message->id);
     }
 
     public function assistant(): BelongsTo

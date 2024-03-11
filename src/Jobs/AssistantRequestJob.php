@@ -2,7 +2,7 @@
 
 namespace DaSie\Openaiassistant\Jobs;
 
-use App\Events\OpenAiRequestEvent;
+use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -20,6 +20,5 @@ class AssistantRequestJob implements ShouldQueue
     public function handle(): void
     {
         event(new OpenAiRequestEvent($this->messageId));
-
     }
 }

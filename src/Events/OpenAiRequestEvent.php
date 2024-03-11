@@ -3,9 +3,10 @@
 namespace DaSie\Openaiassistant\Events;
 
 use DaSie\Openaiassistant\Models\Message;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Events\Dispatchable;
 
-class OpenAiRequestEvent
+class OpenAiRequestEvent implements ShouldQueue
 {
     use Dispatchable;
 
