@@ -64,7 +64,7 @@ class Thread extends Model
                     'messages' => [
                         [
                             'role' => 'user',
-                            'content' => 'Odpowiadaj po polsku dodając AI.',
+                            'content' => config('openai-assistant.initial_message'),
                         ]
                     ],
                 ]);
