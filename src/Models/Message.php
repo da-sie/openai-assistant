@@ -4,7 +4,6 @@ namespace DaSie\Openaiassistant\Models;
 
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
-use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
 use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,6 +16,11 @@ class Message extends Model
     {
         parent::__construct($attributes);
         $this->setTable(config('openai-assistant.table.messages'));
+    }
+
+    public function userable()
+    {
+        return $this->morphTo();
     }
 
     protected static function booted()
@@ -67,7 +71,6 @@ class Message extends Model
                 event(new AssistantUpdatedEvent($this->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
             }
         });
-
     }
 
     public static function run($message): void
