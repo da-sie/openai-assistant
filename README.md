@@ -151,19 +151,31 @@ The package uses queues to send the messages to the AI assistant. After short wh
 An `AssistantUpdatedEvent` is fired when the assistant sends a message or receives response. You can use it to log the
 conversation.
 
-How to retrieve the response? You can use the `messages` relation of the `Thread` model:
+
+### Getting the response
+
+Let's be honest - this is what the AI assistant is all about. We want to get the response!
+Luckily, it is very easy to do. You can use the `getLastMessage` method of the `Thread` model:
+
+
+```php
+$thread
+  ->getLastMessage()
+  ->response;
+```
+
+How to retrieve all messages? Easy. You can use the  `messages`  relation of the `Thread` model:
 
 ```php
 $thread
   ->messages()
   ->latest()
-  ->first()
-  ->response;
+  ->get();
 ```
 
 ### Scoping the conversation
 
-Your assistant needs to know the context of the conversation. You can feed it with text or json, which the assistant
+Your assistant will be more helpful if it knows the context of the conversation. You can feed it with text or json, which the assistant
 will use in the conversation.
 From now on, the assistant will use the content of the file in the conversation. You can also use the `scope` method to
 feed the assistant with the context:

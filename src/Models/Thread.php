@@ -79,30 +79,6 @@ class Thread extends Model
 
     }
 
-    public function delete()
-    {
-        $api = \OpenAI::client(config('openai.api_key'));
-
-        if ($this->assistant_id) {
-            try {
-                $response = $api->assistants()->files()->list($this->assistant_id);
-                foreach ($response->data as $result) {
-                    $api->assistants()->files()->delete(
-                        assistantId: $this->assistant_id,
-                        fileId: $result->id
-                    );
-                }
-                $api->assistants()->delete($this->assistant_id);
-            } catch (\Exception $e) {
-                \Log::error($e->getMessage());
-            }
-        }
-
-        $this->messages()->delete();
-
-        return parent::delete();
-    }
-
     /**
      * Attach file to assistant, return file id
      * @param string $path
@@ -161,16 +137,23 @@ class Thread extends Model
      * Creates a new message with an optional user.
      *
      * @param array $attributes Attributes for the message.
-     * @param \Illuminate\Database\Eloquent\Model|null $user Optional user model.
-     * @return \Illuminate\Database\Eloquent\Model The created message.
+     * @param Model|null $user Optional user model.
+     * @return Model The created message.
      */
-    public function createMessage(array $attributes, $user = null)
+    public function createMessage(array $attributes, $user = null): Model
     {
         if ($user) {
             $attributes['userable_id'] = $user->id;
             $attributes['userable_type'] = get_class($user);
         }
-
         return $this->messages()->create($attributes);
+    }
+
+    /** Retrieves last message from current thread
+     * @return Model last message.
+     */
+    public function getLastMessage(): Model
+    {
+        return $this->messages()->latest()->first();
     }
 }
