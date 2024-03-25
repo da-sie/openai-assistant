@@ -145,6 +145,7 @@ class Thread extends Model
         if ($user) {
             $attributes['userable_id'] = $user->id;
             $attributes['userable_type'] = get_class($user);
+            $attributes['assistant_id'] = $this->assistant->id;
         }
         return $this->messages()->create($attributes);
     }
