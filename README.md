@@ -128,11 +128,22 @@ $thread = $myModel->threads()->create([
 ### Start the conversation
 
 ```php
-$thread->messages()->create([
+$thread->createMessage([
   "prompt" =>
     "Hello, sir. I have a question. What is the capital of France?",
   "response_type" => "text"
 ]);
+```
+optionally, you can also pass current logged user as the second (optional) parameter to the message:
+
+
+```php
+$user = Auth::user();
+$thread->createMessage([
+  "prompt" =>
+    "Hello, sir. I have a question. What is the capital of France?",
+  "response_type" => "text"
+], $user);
 ```
 
 The package uses queues to send the messages to the AI assistant. After short while you will receive the response.

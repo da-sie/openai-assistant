@@ -156,4 +156,21 @@ class Thread extends Model
             return '';
         }
     }
+
+    /**
+     * Creates a new message with an optional user.
+     *
+     * @param array $attributes Attributes for the message.
+     * @param \Illuminate\Database\Eloquent\Model|null $user Optional user model.
+     * @return \Illuminate\Database\Eloquent\Model The created message.
+     */
+    public function createMessage(array $attributes, $user = null)
+    {
+        if ($user) {
+            $attributes['userable_id'] = $user->id;
+            $attributes['userable_type'] = get_class($user);
+        }
+
+        return $this->messages()->create($attributes);
+    }
 }
