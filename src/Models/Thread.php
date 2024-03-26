@@ -64,7 +64,7 @@ class Thread extends Model
                     'messages' => [
                         [
                             'role' => 'user',
-                            'content' => config('openai-assistant.initial_message'),
+                            'content' => config('openai-assistant.assistant.initial_message'),
                         ]
                     ],
                 ]);
@@ -73,7 +73,7 @@ class Thread extends Model
                 $thread->saveQuietly();
             } catch (\Exception $e) {
                 ray($e->getMessage());
-                event(new AssistantUpdatedEvent($this->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+                //event(new AssistantUpdatedEvent($this->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
             }
         });
 
