@@ -27,4 +27,14 @@ class AssistantUpdatedEvent implements ShouldBroadcast
     {
         return $this->data;
     }
+
+    public function getUuid(): string
+    {
+        return $this->uuid;
+    }
+
+    public function getData(): array
+    {
+        return $this->data;
+    }
 }

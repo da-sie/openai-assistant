@@ -2,8 +2,6 @@
 
 namespace DaSie\Openaiassistant\Models;
 
-use DaSie\Openaiassistant\Enums\CheckmarkStatus;
-use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;

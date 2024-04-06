@@ -39,7 +39,7 @@ class OpenAiRequestListener
                 case 'completed':
                     $message->response = $this->validateResponse($message, $this->getLastMessage());
                     $message->save();
-                    event(new AssistantUpdatedEvent($message->thread->uuid, ['steps' => ['processed_ai' => CheckmarkStatus::success], 'completed' => true]));
+                    event(new AssistantUpdatedEvent($message->thread->uuid, ['steps' => ['processed_ai' => CheckmarkStatus::success], 'completed' => true, 'message_id' => $message->id]));
                     break;
                 case 'in_progress':
                     $message->save();
@@ -47,7 +47,7 @@ class OpenAiRequestListener
                     break;
                 default:
                     $message->save();
-                    event(new AssistantUpdatedEvent($message->thread->uuid, ['steps' => ['processed_ai' => CheckmarkStatus::failed], 'completed' => true]));
+                    event(new AssistantUpdatedEvent($message->thread->uuid, ['steps' => ['processed_ai' => CheckmarkStatus::failed], 'completed' => true, 'message_id' => $message->id]));
                     break;
             }
 
