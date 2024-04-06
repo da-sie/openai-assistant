@@ -37,4 +37,5 @@ class AssistantUpdatedEvent implements ShouldBroadcast
     {
         return $this->data;
     }
+
 }
