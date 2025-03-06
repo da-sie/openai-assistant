@@ -157,10 +157,18 @@ class Thread extends Model
         } else {
             throw new \Exception('assistant_id missing');
         }
+
         $attributes['assistant_id'] = $assistantId;
+
         if ($user) {
             $attributes['userable_id'] = $user->id;
+            $attributes['userable_type'] = get_class($user);
+        } else {
+            // Ustaw domyślne wartości dla userable_type i userable_id
+            $attributes['userable_id'] = 0;
+            $attributes['userable_type'] = 'App\\Models\\FaqQuestions';
         }
+
         return $this->messages()->create($attributes);
     }
 

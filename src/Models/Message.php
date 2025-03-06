@@ -68,13 +68,16 @@ class Message extends Model
                 self::run($message);
             } catch (\Exception $e) {
                 ray($e->getMessage());
-                event(new AssistantUpdatedEvent($this->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+                event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
             }
         });
     }
 
     public static function run($message): void
     {
+        // Spróbuj załadować relację assistant
+        $message->load('assistant');
+
         $client = \OpenAI::client(config('openai.api_key'));
 
         $response = $client
