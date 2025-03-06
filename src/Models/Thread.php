@@ -58,17 +58,19 @@ class Thread extends Model
         static::created(function ($thread) {
             try {
                 $client = \OpenAI::client(config('openai.api_key'));
-                $response = $client->threads()->create([
-                    'messages' => [
-                        [
-                            'role' => 'user',
-                            'content' => config('openai-assistant.assistant.initial_message'),
-                        ]
-                    ],
-                ]);
+                // Tworzymy pusty wątek
+                $response = $client->threads()->create([]);
                 $thread->openai_thread_id = $response->id;
                 $thread->status = 'created';
                 $thread->saveQuietly();
+                
+                // Dodajemy wiadomość początkową, jeśli jest potrzebna
+                if (config('openai-assistant.assistant.initial_message')) {
+                    $client->threads()->messages()->create($response->id, [
+                        'role' => 'user',
+                        'content' => config('openai-assistant.assistant.initial_message'),
+                    ]);
+                }
             } catch (\Exception $e) {
                 ray($e->getMessage());
                 //event(new AssistantUpdatedEvent($this->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
@@ -94,14 +96,13 @@ class Thread extends Model
         ]);
         $fileId = $response->id;
 
-        $response = $client
-            ->assistants()
-            ->files()
-            ->create($this->assistant->openai_assistant_id, [
-                'file_id' => $fileId,
-            ]);
+        // Dołączamy plik do asystenta
+        $client->assistants()->modify($this->assistant->openai_assistant_id, [
+            'file_ids' => [$fileId],
+        ]);
+        
         return File::create([
-            'openai_file_id' => $response->id,
+            'openai_file_id' => $fileId,
             'assistant_id' => $this->assistant->id,
             'thread_id' => $this->id,
         ]);

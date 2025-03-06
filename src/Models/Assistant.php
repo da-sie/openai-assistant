@@ -41,16 +41,6 @@ class Assistant extends Model
         static::deleted(function ($assistant) {
             try {
                 $client = \OpenAI::client(config('openai.api_key'));
-                $response = $client
-                    ->assistants()
-                    ->files()
-                    ->list($assistant->openai_assistant_id);
-                foreach ($response->data as $result) {
-                    $client
-                        ->assistants()
-                        ->files()
-                        ->delete(assistantId: $assistant->openai_assistant_id, fileId: $result->id);
-                }
                 $client->assistants()->delete($assistant->openai_assistant_id);
             } catch (\Exception $e) {
                 ray($e->getMessage());
