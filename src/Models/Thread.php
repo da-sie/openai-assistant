@@ -144,18 +144,23 @@ class Thread extends Model
      */
     public function createMessage(array $attributes, $user = null): Model
     {
-        // Zawsze ustawiaj assistant_id
-        $attributes['assistant_id'] = $this->assistant->id;
-
-        if ($user) {
-            $attributes['userable_id'] = $user->id;
-            $attributes['userable_type'] = get_class($user);
-        } else {
-            // Ustaw domyślne wartości dla userable_type i userable_id
-            $attributes['userable_id'] = 0;
-            $attributes['userable_type'] = 'App\\Models\\FaqQuestions';
+        // Upewnij się, że relacja assistant jest załadowana
+        if (!isset($this->attributes['assistant_id']) && !$this->relationLoaded('assistant')) {
+            $this->load('assistant');
         }
 
+        // Bezpiecznie pobierz assistant_id
+        if (isset($this->attributes['assistant_id'])) {
+            $assistantId = $this->attributes['assistant_id'];
+        } elseif ($this->assistant) {
+            $assistantId = $this->assistant->id;
+        } else {
+            throw new \Exception('assistant_id missing');
+        }
+        $attributes['assistant_id'] = $assistantId;
+        if ($user) {
+            $attributes['userable_id'] = $user->id;
+        }
         return $this->messages()->create($attributes);
     }
 
