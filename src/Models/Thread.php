@@ -141,10 +141,12 @@ class Thread extends Model
      */
     public function createMessage(array $attributes, $user = null): Model
     {
+
+        $attributes['assistant_id'] = $this->assistant->id;
+
         if ($user) {
             $attributes['userable_id'] = $user->id;
             $attributes['userable_type'] = get_class($user);
-            $attributes['assistant_id'] = $this->assistant->id;
         }
         return $this->messages()->create($attributes);
     }
