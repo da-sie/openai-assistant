@@ -37,6 +37,8 @@ class Thread extends Model
     }
 
     /**
+     * @param array|string|object $content
+     * @return File
      * @throws \Exception
      */
     public function scope($content): File
@@ -63,7 +65,7 @@ class Thread extends Model
                 $thread->openai_thread_id = $response->id;
                 $thread->status = 'created';
                 $thread->saveQuietly();
-                
+
                 // Dodajemy wiadomość początkową, jeśli jest potrzebna
                 if (config('openai-assistant.assistant.initial_message')) {
                     $client->threads()->messages()->create($response->id, [
@@ -100,7 +102,7 @@ class Thread extends Model
         $client->assistants()->modify($this->assistant->openai_assistant_id, [
             'file_ids' => [$fileId],
         ]);
-        
+
         return File::create([
             'openai_file_id' => $fileId,
             'assistant_id' => $this->assistant->id,
@@ -112,6 +114,7 @@ class Thread extends Model
      * Save content to file and return file path
      * @param array|string|object $content
      * @return string
+     * @throws \Exception
      */
     public function saveContentToFile(array|string|object $content): string
     {
@@ -128,7 +131,7 @@ class Thread extends Model
             return $filePath;
         } catch (\Exception $e) {
             \Log::error($e->getMessage());
-            return '';
+            throw new \Exception('Nie udało się zapisać zawartości do pliku: ' . $e->getMessage());
         }
     }
 
@@ -141,13 +144,18 @@ class Thread extends Model
      */
     public function createMessage(array $attributes, $user = null): Model
     {
-
+        // Zawsze ustawiaj assistant_id
         $attributes['assistant_id'] = $this->assistant->id;
 
         if ($user) {
             $attributes['userable_id'] = $user->id;
             $attributes['userable_type'] = get_class($user);
+        } else {
+            // Ustaw domyślne wartości dla userable_type i userable_id
+            $attributes['userable_id'] = 0;
+            $attributes['userable_type'] = 'App\\Models\\FaqQuestions';
         }
+
         return $this->messages()->create($attributes);
     }
 
