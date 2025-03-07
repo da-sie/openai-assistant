@@ -5,6 +5,7 @@ namespace DaSie\Openaiassistant\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
 
 class Thread extends Model
 {
@@ -38,13 +39,18 @@ class Thread extends Model
 
     /**
      * @param array|string|object $content
-     * @return File
+     * @return mixed
      * @throws \Exception
      */
-    public function scope($content): File
+    public function scope($content)
     {
         $path = $this->saveContentToFile($content);
-        return $this->attachFile($path);
+        try {
+            return $this->attachFile($path);
+        } catch (\Exception $e) {
+            Log::error("Nie udało się dołączyć pliku: " . $e->getMessage());
+            throw $e;
+        }
     }
 
     protected static function booted()
@@ -130,7 +136,7 @@ class Thread extends Model
             file_put_contents($filePath, $content);
             return $filePath;
         } catch (\Exception $e) {
-            \Log::error($e->getMessage());
+            Log::error($e->getMessage());
             throw new \Exception('Nie udało się zapisać zawartości do pliku: ' . $e->getMessage());
         }
     }
@@ -178,5 +184,33 @@ class Thread extends Model
     public function getLastMessage(): Model
     {
         return $this->messages()->latest()->first();
+    }
+
+    /**
+     * Attach multiple files to assistant
+     * @param array $paths Array of file paths
+     * @return array Array of File models and errors
+     */
+    public function attachFiles(array $paths): array
+    {
+        $result = [
+            'files' => [],
+            'errors' => []
+        ];
+        
+        foreach ($paths as $path) {
+            try {
+                $file = $this->attachFile($path);
+                $result['files'][] = $file;
+            } catch (\Exception $e) {
+                $result['errors'][] = [
+                    'path' => $path,
+                    'message' => $e->getMessage()
+                ];
+                Log::error("Nie udało się dołączyć pliku {$path}: " . $e->getMessage());
+            }
+        }
+        
+        return $result;
     }
 }

@@ -42,6 +42,7 @@ return [
     ],
     'assistant' => [
         'engine' => env('OPENAI_ASSISTANT_ENGINE', 'gpt-3.5-turbo-0125'),
+        'initial_message' => env('OPENAI_ASSISTANT_INITIAL_MESSAGE', null),
     ],
     'table' => [
         'assistants' => 'ai_assistants',
@@ -63,16 +64,11 @@ You can do it using the `create` method of the `Assistant` class. The `create` m
 $assistant = Assistant::create([
   "name" => "My assistant",
   "instructions" => "Be kind assistant and answer the questions.",
-  "tools" => [
-    [
-      "type" => "retrieval"
-    ]
-  ],
   "engine" => "gpt-3.5-turbo-0125"
 ]);
 ```
 
-Feel free to modify the assistant's name, instructions, tools, and engine to suit your needs. You probably will create
+Feel free to modify the assistant's name, instructions, and engine to suit your needs. You probably will create
 some CRUD in your application to manage the assistants. But for most cases, you will need only one assistant.
 Of course, you can create as many assistants as you need, and update these later on:
 
@@ -108,6 +104,7 @@ class MyModel extends Model
 {
     // Add the WithAssistant trait to your model
     use WithAssistant;
+}
 ```
 
 Now you enabled the AI assistant for your model. You can use following relation to interact with the assistant:
@@ -127,6 +124,8 @@ $thread = $myModel->threads()->create([
 
 ### Start the conversation
 
+When you create a new thread, it will automatically create an empty thread in OpenAI. If you have configured an initial message in your config file, it will also be sent to the thread.
+
 ```php
 $thread->createMessage([
   "prompt" =>
@@ -135,7 +134,6 @@ $thread->createMessage([
 ]);
 ```
 optionally, you can also pass current logged user as the second (optional) parameter to the message:
-
 
 ```php
 $user = Auth::user();
@@ -151,12 +149,10 @@ The package uses queues to send the messages to the AI assistant. After short wh
 An `AssistantUpdatedEvent` is fired when the assistant sends a message or receives response. You can use it to log the
 conversation.
 
-
 ### Getting the response
 
 Let's be honest - this is what the AI assistant is all about. We want to get the response!
 Luckily, it is very easy to do. You can use the `getLastMessage` method of the `Thread` model:
-
 
 ```php
 $thread
@@ -190,6 +186,87 @@ If you have already the file you want to use in the conversation, you can attach
 $thread->attachFile($path);
 ```
 
-## License
+This will upload the file to OpenAI and attach it to the assistant. The file will be available for all threads using this assistant.
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+If you need to attach multiple files at once, you can use the `attachFiles` method:
+
+```php
+$result = $thread->attachFiles([$path1, $path2, $path3]);
+// $result contains 'files' and 'errors' arrays
+```
+
+### Managing assistant files
+
+Sometimes you may want to reset the assistant's knowledge by removing all files. You can do this with the `resetFiles` method on the assistant:
+
+```php
+$assistant->resetFiles();
+```
+
+This will:
+1. Remove all files from the assistant in OpenAI by setting an empty `file_ids` array
+2. Attempt to delete each file from OpenAI's storage (with error handling for each file)
+3. Remove all file records from your database
+4. Return the assistant instance for method chaining
+
+This is useful when you want to completely refresh the assistant's knowledge base:
+
+```php
+// Reset and add new files in one chain
+$assistant->resetFiles()
+    ->attachFiles([$newPath1, $newPath2]);
+```
+
+You can also add files directly to the assistant without going through a thread:
+
+```php
+$file = $assistant->attachFile($path);
+```
+
+When you don't specify a thread, the system will:
+1. First try to find an existing thread for this assistant
+2. If no thread exists, it will create a "system" thread automatically
+3. This ensures that the database constraint for `thread_id` is satisfied
+
+Or specify a thread to associate the file with:
+
+```
+
+### Thread Management
+
+When adding files directly to an assistant without specifying a thread, the system needs to handle the database constraint for `thread_id`. Here's how it works:
+
+1. First, the system tries to find an existing thread for this assistant
+2. If no thread exists, it creates a "system" thread automatically with:
+   ```php
+   $thread = $assistant->threads()->create([
+       'uuid' => uniqid('system_'),
+       'model_id' => 0,
+       'model_type' => 'System',
+   ]);
+   ```
+3. This ensures that the database constraint for `thread_id` is satisfied
+4. The system thread is used only for file management and doesn't affect your regular conversations
+
+This approach allows you to manage files directly through the assistant without worrying about thread management, while still maintaining database integrity.
+
+If you need to remove a specific file from the assistant:
+
+```php
+$assistant->removeFile($fileId);
+```
+
+This will remove the file from both OpenAI and your database. The method handles errors gracefully:
+- If the file doesn't exist in OpenAI, it will still be removed from your database
+- If there's an error communicating with OpenAI, the method will log the error and return false
+- On success, the method returns true
+
+To get a list of files currently attached to the assistant in OpenAI:
+
+```php
+$files = $assistant->getOpenAIFiles();
+```
+
+The returned array contains detailed information about each file:
+
+## License
