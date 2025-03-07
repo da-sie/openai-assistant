@@ -26,12 +26,18 @@ class Assistant extends Model
         static::updated(function ($assistant) {
             try {
                 $client = \OpenAI::client(config('openai.api_key'));
-                $client->assistants()->modify($assistant->openai_assistant_id, [
-                    'name' => $assistant->name,
-                    'instructions' => $assistant->instructions,
-                    'model' => $assistant->engine,
-                ]);
-                // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
+                
+                // Sprawdzamy, czy openai_assistant_id istnieje
+                if (!empty($assistant->openai_assistant_id)) {
+                    $client->assistants()->modify($assistant->openai_assistant_id, [
+                        'name' => $assistant->name,
+                        'instructions' => $assistant->instructions,
+                        'model' => $assistant->engine,
+                    ]);
+                    // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
+                } else {
+                    Log::warning('Próba aktualizacji asystenta bez openai_assistant_id');
+                }
             } catch (\Exception $e) {
                 ray($e->getMessage());
                 Log::error($e->getMessage());
@@ -41,7 +47,13 @@ class Assistant extends Model
         static::deleted(function ($assistant) {
             try {
                 $client = \OpenAI::client(config('openai.api_key'));
-                $client->assistants()->delete($assistant->openai_assistant_id);
+                
+                // Sprawdzamy, czy openai_assistant_id istnieje
+                if (!empty($assistant->openai_assistant_id)) {
+                    $client->assistants()->delete($assistant->openai_assistant_id);
+                } else {
+                    Log::warning('Próba usunięcia asystenta bez openai_assistant_id');
+                }
             } catch (\Exception $e) {
                 ray($e->getMessage());
                 Log::error($e->getMessage());
@@ -97,6 +109,12 @@ class Assistant extends Model
         try {
             $client = \OpenAI::client(config('openai.api_key'));
             
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba resetowania plików asystenta bez openai_assistant_id');
+                return $this;
+            }
+            
             // Modyfikujemy asystenta, ustawiając pustą tablicę file_ids
             $client->assistants()->modify($this->openai_assistant_id, [
                 'file_ids' => [],
@@ -135,6 +153,12 @@ class Assistant extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
+            
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba pobrania plików asystenta bez openai_assistant_id');
+                return [];
+            }
             
             // Pobieramy informacje o asystencie, który zawiera listę file_ids
             $assistantData = $client->assistants()->retrieve($this->openai_assistant_id);
@@ -182,6 +206,12 @@ class Assistant extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
+            
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba usunięcia pliku asystenta bez openai_assistant_id');
+                return false;
+            }
             
             // Pobieramy informacje o asystencie, który zawiera listę file_ids
             $assistantData = $client->assistants()->retrieve($this->openai_assistant_id);
@@ -233,6 +263,12 @@ class Assistant extends Model
         try {
             if (is_file($path) === false) {
                 throw new \Exception('File not found');
+            }
+            
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba dodania pliku do asystenta bez openai_assistant_id');
+                return null;
             }
             
             $client = \OpenAI::client(config('openai.api_key'));
@@ -330,6 +366,16 @@ class Assistant extends Model
     public function updateKnowledge(array $paths, ?int $threadId = null): array
     {
         try {
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba aktualizacji wiedzy asystenta bez openai_assistant_id');
+                return [
+                    'success' => false,
+                    'message' => 'Asystent nie ma identyfikatora OpenAI.',
+                    'error' => 'openai_assistant_id is null',
+                ];
+            }
+            
             // Resetujemy pliki asystenta (usuwa wszystkie pliki i vector store)
             $this->resetFiles();
             
