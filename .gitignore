@@ -1,1 +1,13 @@
 /vendor/
+/.phpunit.cache
+/.phpunit.result.cache
+/composer.lock
+/.idea
+/.vscode
+/node_modules
+/build
+/coverage
+.env
+.env.testing
+.phpunit.result.cache
+.DS_Store

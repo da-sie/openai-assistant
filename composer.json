@@ -23,9 +23,10 @@
     },
     "require-dev": {
         "laravel/pint": "^1.0",
+        "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^7.8",
         "orchestra/testbench": "^8.8",
-        "pestphp/pest": "^2.20",
+        "pestphp/pest": "^2.36",
         "pestphp/pest-plugin-arch": "^2.5",
         "pestphp/pest-plugin-laravel": "^2.0",
         "spatie/laravel-ray": "^1.26"
@@ -39,7 +40,8 @@
     "autoload-dev": {
         "psr-4": {
             "DaSie\\Openaiassistant\\Tests\\": "tests/",
-            "Workbench\\App\\": "workbench/app/"
+            "Workbench\\App\\": "workbench/app/",
+            "Tests\\": "tests/"
         }
     },
     "scripts": {

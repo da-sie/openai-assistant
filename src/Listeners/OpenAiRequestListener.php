@@ -6,26 +6,88 @@ use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use DaSie\Openaiassistant\Events\OpenAiRequestEvent;
 use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
-use OpenAI\Client;
-use OpenAI\Responses\Threads\Messages\ThreadMessageListResponse;
-use OpenAI\Responses\Threads\Runs\Steps\ThreadRunStepListResponse;
+use DaSie\Openaiassistant\Models\Message;
+use Illuminate\Support\Facades\Log;
 
 class OpenAiRequestListener
 {
-
-    private Client $client;
-    private string $thread_id;
-    private string $run_id;
-
-    public function __construct()
-    {
-        $this->client = \OpenAI::client(config('openai.api_key'));
-    }
-
     public function handle(OpenAiRequestEvent $event): void
     {
         $message = $event->message;
-
+        
+        // Sprawdź, czy streaming jest włączony w konfiguracji
+        $useStreaming = config('openai-assistant.streaming', false);
+        
+        if ($useStreaming) {
+            // Użyj streamingu
+            $this->handleWithStreaming($message);
+        } else {
+            // Użyj standardowej metody bez streamingu
+            $this->handleWithoutStreaming($message);
+        }
+    }
+    
+    /**
+     * Obsługuje event z wykorzystaniem streamingu
+     * 
+     * @param Message $message
+     * @return void
+     */
+    protected function handleWithStreaming(Message $message): void
+    {
+        try {
+            // Uruchom wątek ze streamingiem
+            $message->runWithStreaming(function ($chunk, $message, $isCompleted = false, $error = null) {
+                if ($error) {
+                    // Obsługa błędu
+                    event(new AssistantUpdatedEvent($message->thread->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                        'completed' => true,
+                        'message_id' => $message->id,
+                        'error' => $error->getMessage()
+                    ]));
+                    return;
+                }
+                
+                if ($isCompleted) {
+                    // Obsługa zakończenia
+                    event(new AssistantUpdatedEvent($message->thread->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::success],
+                        'completed' => true,
+                        'message_id' => $message->id
+                    ]));
+                    return;
+                }
+                
+                // Obsługa fragmentu odpowiedzi
+                event(new AssistantUpdatedEvent($message->thread->uuid, [
+                    'steps' => ['processed_ai' => 'in_progress'],
+                    'completed' => false,
+                    'message_id' => $message->id,
+                    'partial_response' => true
+                ]));
+            });
+        } catch (\Exception $e) {
+            Log::error('Błąd podczas streamowania odpowiedzi: ' . $e->getMessage());
+            
+            // Obsługa błędu
+            event(new AssistantUpdatedEvent($message->thread->uuid, [
+                'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                'completed' => true,
+                'message_id' => $message->id,
+                'error' => $e->getMessage()
+            ]));
+        }
+    }
+    
+    /**
+     * Obsługuje event bez wykorzystania streamingu (standardowa metoda)
+     * 
+     * @param Message $message
+     * @return void
+     */
+    protected function handleWithoutStreaming(Message $message): void
+    {
         $this->thread_id = $message->thread->openai_thread_id;
         $this->run_id = $message->openai_run_id;
 
@@ -55,48 +117,4 @@ class OpenAiRequestListener
             AssistantRequestJob::dispatch($message->id)->delay(now()->addSeconds(2));
         }
     }
-
-    private function getLastMessage(): string
-    {
-        $messages = $this->getMessages();
-        if (count($messages->data) == 0) {
-            return '';
-        }
-
-        return $messages->data[0]->content[0]->text->value;
-    }
-
-    private function getMessages(): ThreadMessageListResponse
-    {
-        return $this->client
-            ->threads()
-            ->messages()
-            ->list($this->thread_id, [
-                'limit' => 10,
-            ]);
-    }
-
-    private function getResponseByRun(): ThreadRunStepListResponse
-    {
-        return $this->client
-            ->threads()
-            ->runs()
-            ->steps()
-            ->list(
-                threadId: $this->thread_id,
-                runId: $this->run_id,
-                parameters: [
-                    'limit' => 10,
-                ]
-            );
-    }
-
-    private function validateResponse($message, $response)
-    {
-        if ($message->response_type == 'json') {
-            $response = str_replace(['```json', '```'], [], $response);
-        }
-
-        return $response;
-    }
-}
+} 

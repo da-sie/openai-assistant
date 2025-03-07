@@ -7,10 +7,21 @@ use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Log;
 
 class Message extends Model
 {
     protected $guarded = [];
+    
+    /**
+     * Statusy przetwarzania wiadomości
+     */
+    const STATUS_PENDING = 'pending';
+    const STATUS_PROCESSING = 'processing';
+    const STATUS_COMPLETED = 'completed';
+    const STATUS_FAILED = 'failed';
+    const STATUS_COMPLETED_NO_RESPONSE = 'completed_no_response';
+    const STATUS_COMPLETED_WITH_ERROR = 'completed_with_error';
 
     public function __construct(array $attributes = [])
     {
@@ -18,6 +29,9 @@ class Message extends Model
         $this->setTable(config('openai-assistant.table.messages'));
     }
 
+    /**
+     * Relacja do użytkownika (polimorficzna)
+     */
     public function userable()
     {
         return $this->morphTo();
@@ -27,47 +41,23 @@ class Message extends Model
     {
         static::created(function ($message) {
             try {
-                $client = \OpenAI::client(config('openai.api_key'));
-                $message->load('thread');
-
-                $messageParams = [
-                    'role' => 'user'
-                ];
-
-                switch ($message->response_type) {
-                    case 'html':
-                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie kod html - zacznij odpowiedź od <p>, zakończ na </p>. Akceptowane tagi: p, span, strong, br. Nie używaj markdownu.';
-                        break;
-                    case 'markdown':
-                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie markdown - zacznij odpowiedź od #, zakończ na #. Akceptowane tagi: #, ##, ###, ####, **, *, __, ~~. Nie używaj html.';
-                        break;
-                    case 'json':
-                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie json.';
-                        break;
-                    default:
-                        $messageParams['content'] = $message->prompt . ' Format wyjściowy to wyłącznie tekst.';
-                        break;
+                // Załaduj relację thread, jeśli nie jest załadowana
+                if (!$message->relationLoaded('thread')) {
+                    $message->load('thread');
                 }
-
-                if ($message->thread->files->count() > 0) {
-                    $messageParams['file_ids'] = $message->thread->files->pluck('openai_file_id')->toArray();
-                    $messageParams['content'] = $messageParams['content'] . ' Odpowiedź oprzyj wyłącznie na załączonych plikach.';
-                }
-
-                $response = $client
-                    ->threads()
-                    ->messages()
-                    ->create(
-                        threadId: $message->thread->openai_thread_id,
-                        parameters: $messageParams);
-
-                $message->openai_message_id = $response->id;
-                $message->assistant_id = $message->thread->assistant_id;
-                $message->run_status = 'pending';
-                $message->saveQuietly();
+                
+                // Utwórz wiadomość w OpenAI
+                $message->createInOpenAI();
+                
+                // Uruchom asystenta
                 self::run($message);
             } catch (\Exception $e) {
-                ray($e->getMessage());
+                Log::error('Błąd podczas tworzenia wiadomości: ' . $e->getMessage(), [
+                    'exception' => $e,
+                    'message_id' => $message->id,
+                    'thread_id' => $message->thread_id ?? null,
+                ]);
+                
                 // Używamy thread->assistant zamiast this->assistant
                 if ($message->thread && $message->thread->assistant) {
                     event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
@@ -75,7 +65,78 @@ class Message extends Model
             }
         });
     }
+    
+    /**
+     * Tworzy wiadomość w OpenAI
+     * 
+     * @return void
+     */
+    protected function createInOpenAI(): void
+    {
+        $client = \OpenAI::client(config('openai.api_key'));
+        
+        // Przygotuj parametry wiadomości
+        $messageParams = $this->prepareMessageParameters();
+        
+        // Wyślij wiadomość do OpenAI
+        $response = $client
+            ->threads()
+            ->messages()
+            ->create(
+                threadId: $this->thread->openai_thread_id,
+                parameters: $messageParams
+            );
+        
+        // Zapisz identyfikator wiadomości z OpenAI
+        $this->openai_message_id = $response->id;
+        $this->assistant_id = $this->thread->assistant_id;
+        $this->run_status = self::STATUS_PENDING;
+        $this->saveQuietly();
+    }
+    
+    /**
+     * Przygotowuje parametry wiadomości dla OpenAI
+     * 
+     * @return array Parametry wiadomości
+     */
+    protected function prepareMessageParameters(): array
+    {
+        $messageParams = [
+            'role' => 'user',
+            'content' => $this->prompt,
+        ];
+        
+        // Dodaj instrukcje formatowania w zależności od typu odpowiedzi
+        switch ($this->response_type) {
+            case 'html':
+                $messageParams['content'] .= ' Format wyjściowy to wyłącznie kod html - zacznij odpowiedź od <p>, zakończ na </p>. Akceptowane tagi: p, span, strong, br. Nie używaj markdownu.';
+                break;
+            case 'markdown':
+                $messageParams['content'] .= ' Format wyjściowy to wyłącznie markdown - zacznij odpowiedź od #, zakończ na #. Akceptowane tagi: #, ##, ###, ####, **, *, __, ~~. Nie używaj html.';
+                break;
+            case 'json':
+                $messageParams['content'] .= ' Format wyjściowy to wyłącznie json.';
+                break;
+            default:
+                $messageParams['content'] .= ' Format wyjściowy to wyłącznie tekst.';
+                break;
+        }
+        
+        // Dodaj pliki, jeśli są dostępne
+        if ($this->thread->files->count() > 0) {
+            $messageParams['file_ids'] = $this->thread->files->pluck('openai_file_id')->toArray();
+            $messageParams['content'] .= ' Odpowiedź oprzyj wyłącznie na załączonych plikach.';
+        }
+        
+        return $messageParams;
+    }
 
+    /**
+     * Uruchamia asystenta dla wiadomości
+     * 
+     * @param Message $message Wiadomość, dla której uruchamiamy asystenta
+     * @return void
+     */
     public static function run($message): void
     {
         try {
@@ -89,8 +150,14 @@ class Message extends Model
                 $message->thread->load('assistant');
             }
             
+            // Sprawdź, czy asystent jest poprawnie skonfigurowany
+            if (!$message->thread->assistant || !$message->thread->assistant->openai_assistant_id) {
+                throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
+            }
+            
             $client = \OpenAI::client(config('openai.api_key'));
             
+            // Uruchom asystenta
             $response = $client
                 ->threads()
                 ->runs()
@@ -100,24 +167,60 @@ class Message extends Model
                         'assistant_id' => $message->thread->assistant->openai_assistant_id,
                     ]
                 );
+            
+            // Zapisz identyfikator uruchomienia
             $message->openai_run_id = $response->id;
+            $message->run_status = self::STATUS_PROCESSING;
             $message->saveQuietly();
             
+            // Uruchom zadanie w tle do monitorowania statusu
             AssistantRequestJob::dispatch($message->id);
         } catch (\Exception $e) {
-            ray($e->getMessage());
+            Log::error('Błąd podczas uruchamiania asystenta: ' . $e->getMessage(), [
+                'exception' => $e,
+                'message_id' => $message->id,
+                'thread_id' => $message->thread_id ?? null,
+            ]);
+            
+            // Aktualizuj status wiadomości
+            $message->run_status = self::STATUS_FAILED;
+            $message->saveQuietly();
+            
             // Używamy thread->assistant zamiast this->assistant
             if ($message->thread && $message->thread->assistant) {
                 event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
             }
         }
     }
+    
+    /**
+     * Uruchamia asystenta ze streamingiem
+     * 
+     * @param callable $streamCallback Callback wywoływany dla każdego fragmentu odpowiedzi
+     * @return void
+     */
+    public function runWithStreaming(callable $streamCallback): void
+    {
+        // Upewnij się, że relacja thread jest załadowana
+        if (!$this->relationLoaded('thread')) {
+            $this->load('thread');
+        }
+        
+        // Uruchom streaming w wątku
+        $this->thread->runWithStreaming($this, $streamCallback);
+    }
 
+    /**
+     * Relacja do asystenta
+     */
     public function assistant(): BelongsTo
     {
         return $this->belongsTo(Assistant::class);
     }
 
+    /**
+     * Relacja do wątku
+     */
     public function thread(): BelongsTo
     {
         return $this->belongsTo(Thread::class);

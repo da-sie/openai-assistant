@@ -177,6 +177,119 @@ $thread
   ->get();
 ```
 
+### Streaming Responses
+
+One of the most powerful features of this package is the ability to stream responses from the assistant in real-time. This creates a more interactive experience for your users, as they can see the assistant's response being generated word by word.
+
+To use streaming, you can use the `runWithStreaming` method on a Thread:
+
+```php
+$message = $thread->createMessage([
+  "prompt" => "Tell me a story about a brave knight",
+  "response_type" => "text"
+]);
+
+$thread->runWithStreaming($message, function($chunk, $message, $isDone = false, $error = null) {
+    if ($error) {
+        // Handle error
+        Log::error('Error in streaming: ' . $error->getMessage());
+        return;
+    }
+    
+    if ($isDone) {
+        // Streaming is complete
+        echo "Streaming completed!";
+        return;
+    }
+    
+    // Process each chunk of the response
+    echo $chunk;
+    
+    // You can also broadcast this chunk to a websocket for real-time updates
+    broadcast(new MessageChunkReceived($chunk, $message->thread_id));
+});
+```
+
+The streaming callback receives four parameters:
+- `$chunk`: The text chunk from the assistant (null when streaming is complete)
+- `$message`: The message object being processed
+- `$isDone`: Boolean indicating if streaming is complete
+- `$error`: Any error that occurred during streaming (null if no error)
+
+This approach is perfect for creating chat interfaces where users can see the assistant typing in real-time.
+
+### Using Tools with Assistants
+
+OpenAI Assistants can use tools to perform actions or retrieve information. This package provides built-in support for handling tool calls during conversations.
+
+When an assistant requires a tool action, the package will automatically handle the interaction:
+
+```php
+$thread->runWithStreaming($message, function($chunk, $message, $isDone = false, $error = null) {
+    // Same callback as before
+});
+```
+
+The default implementation provides a simple response for tool calls, but you can customize this behavior by extending the Thread class or implementing your own tool handlers.
+
+For more advanced tool handling, you can create a custom implementation:
+
+```php
+// Custom tool handler example
+class MyToolHandler
+{
+    public function handleToolCall($toolCall)
+    {
+        $function = $toolCall->function->name ?? '';
+        $arguments = json_decode($toolCall->function->arguments ?? '{}', true);
+        
+        switch ($function) {
+            case 'get_weather':
+                return ['temperature' => 22, 'condition' => 'sunny'];
+            case 'search_database':
+                return $this->searchDatabase($arguments['query']);
+            default:
+                return ['error' => 'Unknown function'];
+        }
+    }
+    
+    private function searchDatabase($query)
+    {
+        // Implementation of database search
+        return ['results' => [/* search results */]];
+    }
+}
+```
+
+Then you can use this handler in your application:
+
+```php
+$toolHandler = new MyToolHandler();
+
+// When processing tool calls
+$toolOutputs = [];
+foreach ($toolCalls as $toolCall) {
+    $result = $toolHandler->handleToolCall($toolCall);
+    $toolOutputs[] = [
+        'tool_call_id' => $toolCall->id,
+        'output' => json_encode($result),
+    ];
+}
+```
+
+### Creating Threads Programmatically
+
+You can create threads programmatically using the static `createWithOpenAI` method:
+
+```php
+$thread = Thread::createWithOpenAI($assistant, [
+    'user_id' => $user->id,
+    'context' => 'customer_support'
+]);
+```
+
+This method creates both a local thread record and a thread in OpenAI, linking them together. The second parameter allows you to pass metadata that will be stored with the thread.
+
 ### Scoping the conversation
 
 Your assistant will be more helpful if it knows the context of the conversation. You can feed it with text or json, which the assistant
@@ -202,6 +315,23 @@ If you need to attach multiple files at once, you can use the `attachFiles` meth
 $result = $thread->attachFiles([$path1, $path2, $path3]);
 // $result contains 'files' and 'errors' arrays
 ```
+
+### Managing Files in Threads
+
+You can manage files directly in threads using several methods:
+
+```php
+// Add a file to a thread
+$fileId = $thread->addFile($openaiFileId);
+
+// Get all files in a thread
+$files = $thread->getFiles();
+
+// Remove a file from a thread
+$success = $thread->removeFile($fileId);
+```
+
+These methods interact directly with the OpenAI API to manage files associated with the thread.
 
 ### Managing assistant files
 
@@ -235,10 +365,6 @@ When you don't specify a thread, the system will:
 1. First try to find an existing thread for this assistant
 2. If no thread exists, it will create a "system" thread automatically
 3. This ensures that the database constraint for `thread_id` is satisfied
-
-Or specify a thread to associate the file with:
-
-```
 
 ### Thread Management
 
@@ -275,7 +401,7 @@ To get a list of files currently attached to the assistant in OpenAI:
 $files = $assistant->getOpenAIFiles();
 ```
 
-The returned array contains detailed information about each file:
+The returned array contains detailed information about each file.
 
 ### Updating Assistant Knowledge
 
@@ -354,5 +480,128 @@ The returned array contains detailed information about the vector store:
 If no vector store is found for the assistant, the method returns `null`.
 
 This approach allows you to handle errors gracefully without stopping the entire process.
+
+If you already have a vector store created in OpenAI and want to link it to your assistant, you can use the `linkVectorStore` method:
+
+```php
+$success = $assistant->linkVectorStore('vs_abc123');
+```
+
+This method will:
+1. Check if the vector store exists
+2. Update the assistant to use the specified vector store
+3. Save the vector store ID in your database
+
+This is useful when you've created a vector store manually in the OpenAI playground or through another method and want to use it with your assistant.
+
+This approach allows you to handle errors gracefully without stopping the entire process.
+
+If you need to link multiple vector stores to your assistant, you can use the `linkMultipleVectorStores` method:
+
+```php
+$success = $assistant->linkMultipleVectorStores(['vs_abc123', 'vs_def456']);
+```
+
+This method will check if all vector stores exist and link only the valid ones to your assistant.
+
+You can check the status of your assistant's vector store configuration using the `checkVectorStoreStatus` method:
+
+```php
+$status = $assistant->checkVectorStoreStatus();
+```
+
+This method returns detailed information about the vector store configuration:
+
+```php
+[
+    'status' => 'success',
+    'has_retrieval_tool' => true,
+    'has_vector_store_id' => true,
+    'is_linked' => true,
+    'vector_store_id' => 'vs_abc123',
+    'linked_vector_store_ids' => ['vs_abc123', 'vs_def456'],
+    'vector_store' => [
+        'id' => 'vs_abc123',
+        'name' => 'Vector store for assistant My Assistant',
+    ],
+]
+```
+
+You can also search your assistant's vector store using the `searchVectorStore` method:
+
+```php
+$results = $assistant->searchVectorStore('What is the capital of France?');
+```
+
+This method uses the assistant to search the vector store and returns the results:
+
+```php
+[
+    'query' => 'What is the capital of France?',
+    'vector_store_id' => 'vs_abc123',
+    'results' => [
+        // Array of messages from the assistant
+    ],
+]
+```
+
+### Events and Websockets Integration
+
+This package fires events that you can use to integrate with Laravel Echo and websockets for real-time updates:
+
+```php
+// In your EventServiceProvider
+protected $listen = [
+    'DaSie\Openaiassistant\Events\AssistantUpdatedEvent' => [
+        'App\Listeners\AssistantUpdatedListener',
+    ],
+    'App\Events\MessageChunkReceived' => [
+        'App\Listeners\MessageChunkListener',
+    ],
+];
+```
+
+You can create a custom event for streaming chunks:
+
+```php
+namespace App\Events;
+
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class MessageChunkReceived implements ShouldBroadcast
+{
+    use Dispatchable, InteractsWithSockets, SerializesModels;
+
+    public $chunk;
+    public $threadId;
+
+    public function __construct($chunk, $threadId)
+    {
+        $this->chunk = $chunk;
+        $this->threadId = $threadId;
+    }
+
+    public function broadcastOn()
+    {
+        return new Channel('thread.' . $this->threadId);
+    }
+}
+```
+
+Then in your frontend, you can listen for these events:
+
+```javascript
+Echo.channel(`thread.${threadId}`)
+    .listen('MessageChunkReceived', (e) => {
+        // Append the chunk to your chat interface
+        appendMessageChunk(e.chunk);
+    });
+```
+
+This creates a seamless real-time chat experience with the AI assistant.
 
 ## License
