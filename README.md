@@ -26,6 +26,14 @@ php artisan vendor:publish --tag="openai-assistant-migrations"
 php artisan migrate
 ```
 
+If you're upgrading from a previous version, you may need to run the additional migration to add vector store support:
+
+```bash
+php artisan migrate
+```
+
+This will add the `vector_store_id` column to the assistants table, which is used to store the ID of the vector store associated with the assistant.
+
 You can publish the config file with:
 
 ```bash
@@ -284,6 +292,7 @@ The method returns detailed information about the operation:
     'success' => true,
     'message' => 'Wiedza asystenta została zaktualizowana.',
     'files_added' => 2,
+    'vector_store_id' => 'vs_abc123',
     'errors' => [
         [
             'path' => '/path/to/file3.pdf',
@@ -305,21 +314,44 @@ This method is particularly useful when:
 - You want to ensure the vector store is rebuilt from scratch
 
 Under the hood, this method:
-1. Calls `resetFiles()` to remove all existing files from OpenAI and your database
-2. Calls `attachFiles()` to add the new files
-3. OpenAI automatically creates a new vector store with the new files
+1. Uploads new files to OpenAI
+2. Checks if a vector store already exists for this assistant and deletes it if found
+3. Creates a new vector store and associates it with the assistant
+4. Adds the uploaded files to the vector store
+5. Updates the assistant to use the new vector store and files
+6. Saves file records in your database
 
 #### About Vector Stores in OpenAI
 
-When you add files to an assistant, OpenAI automatically:
+When you add files to a vector store, OpenAI automatically:
 - Parses the content of the files
 - Chunks the content into smaller pieces
 - Creates embeddings for each chunk
 - Builds a vector store for efficient semantic search
 
-This process happens transparently, without requiring you to manually manage embeddings or vector databases. When your assistant receives a query, it can search this vector store to find relevant information from your files.
+This process happens transparently, but unlike the previous approach, we now explicitly manage the vector store to ensure it's properly created and associated with the assistant.
 
-Updating the vector store is as simple as updating the files attached to your assistant. The `updateKnowledge` method provides a convenient way to completely refresh the vector store when you have significant changes to your knowledge base.
+You can retrieve information about the assistant's vector store using the `getVectorStore` method:
+
+```php
+$vectorStore = $assistant->getVectorStore();
+```
+
+The returned array contains detailed information about the vector store:
+
+```php
+[
+    'id' => 'vs_abc123',
+    'name' => 'Vector store for assistant My Assistant',
+    'created_at' => '2023-05-15 10:30:45',
+    'file_count' => 2,
+    'files' => [
+        // Array of file objects
+    ]
+]
+```
+
+If no vector store is found for the assistant, the method returns `null`.
 
 This approach allows you to handle errors gracefully without stopping the entire process.
 

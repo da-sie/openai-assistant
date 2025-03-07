@@ -13,6 +13,7 @@ class Assistant extends Model
         'name',
         'instructions',
         'engine',
+        'vector_store_id',
     ];
 
     public function __construct(array $attributes = [])
@@ -113,6 +114,31 @@ class Assistant extends Model
             if (empty($this->openai_assistant_id)) {
                 Log::warning('Próba resetowania plików asystenta bez openai_assistant_id');
                 return $this;
+            }
+            
+            // Jeśli mamy zapisany vector_store_id, usuwamy vector store
+            if (!empty($this->vector_store_id)) {
+                try {
+                    $client->vectorStores()->delete($this->vector_store_id);
+                    $this->vector_store_id = null;
+                    $this->saveQuietly();
+                } catch (\Exception $e) {
+                    Log::warning("Nie udało się usunąć vector store {$this->vector_store_id}: " . $e->getMessage());
+                }
+            } else {
+                // Jeśli nie mamy zapisanego vector_store_id, szukamy vector store dla tego asystenta
+                try {
+                    $vectorStores = $client->vectorStores()->list();
+                    
+                    foreach ($vectorStores->data as $vectorStore) {
+                        if (isset($vectorStore->metadata['assistant_id']) && $vectorStore->metadata['assistant_id'] === $this->openai_assistant_id) {
+                            $client->vectorStores()->delete($vectorStore->id);
+                            break;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Nie udało się znaleźć i usunąć vector store dla asystenta: " . $e->getMessage());
+                }
             }
             
             // Modyfikujemy asystenta, ustawiając pustą tablicę file_ids
@@ -376,18 +402,148 @@ class Assistant extends Model
                 ];
             }
             
-            // Resetujemy pliki asystenta (usuwa wszystkie pliki i vector store)
-            $this->resetFiles();
+            $client = \OpenAI::client(config('openai.api_key'));
             
-            // Dodajemy nowe pliki (tworzy nowy vector store)
-            $result = $this->attachFiles($paths, $threadId);
+            // Najpierw przesyłamy pliki do OpenAI
+            $uploadedFiles = [];
+            $errors = [];
             
-            return [
-                'success' => true,
-                'message' => 'Wiedza asystenta została zaktualizowana.',
-                'files_added' => count($result['files']),
-                'errors' => $result['errors'],
-            ];
+            foreach ($paths as $path) {
+                try {
+                    if (is_file($path) === false) {
+                        $errors[] = [
+                            'path' => $path,
+                            'message' => 'File not found'
+                        ];
+                        continue;
+                    }
+                    
+                    // Przesyłamy plik do OpenAI
+                    $response = $client->files()->upload([
+                        'purpose' => 'assistants',
+                        'file' => fopen($path, 'r'),
+                    ]);
+                    
+                    $uploadedFiles[] = $response->id;
+                } catch (\Exception $e) {
+                    $errors[] = [
+                        'path' => $path,
+                        'message' => $e->getMessage()
+                    ];
+                    Log::error("Nie udało się przesłać pliku {$path}: " . $e->getMessage());
+                }
+            }
+            
+            if (empty($uploadedFiles)) {
+                return [
+                    'success' => false,
+                    'message' => 'Nie udało się przesłać żadnego pliku.',
+                    'errors' => $errors,
+                ];
+            }
+            
+            // Tworzymy nowy vector store
+            try {
+                // Najpierw sprawdzamy, czy asystent ma już vector store
+                $vectorStores = $client->vectorStores()->list();
+                $existingVectorStore = null;
+                
+                foreach ($vectorStores->data as $vectorStore) {
+                    if (isset($vectorStore->metadata['assistant_id']) && $vectorStore->metadata['assistant_id'] === $this->openai_assistant_id) {
+                        $existingVectorStore = $vectorStore;
+                        break;
+                    }
+                }
+                
+                // Jeśli istnieje, usuwamy go
+                if ($existingVectorStore) {
+                    $client->vectorStores()->delete($existingVectorStore->id);
+                }
+                
+                // Tworzymy nowy vector store
+                $vectorStore = $client->vectorStores()->create([
+                    'name' => 'Vector store for assistant ' . $this->name,
+                    'metadata' => [
+                        'assistant_id' => $this->openai_assistant_id
+                    ],
+                ]);
+                
+                // Zapisujemy vector_store_id w bazie danych
+                $this->vector_store_id = $vectorStore->id;
+                $this->saveQuietly();
+                
+                // Dodajemy pliki do vector store
+                foreach ($uploadedFiles as $fileId) {
+                    $client->vectorStores()->files()->create($vectorStore->id, [
+                        'file_id' => $fileId,
+                    ]);
+                }
+                
+                // Aktualizujemy asystenta, aby używał nowego vector store
+                $client->assistants()->modify($this->openai_assistant_id, [
+                    'tools' => [
+                        [
+                            'type' => 'retrieval',
+                        ],
+                    ],
+                    'file_ids' => $uploadedFiles,
+                ]);
+                
+                // Zapisujemy pliki w bazie danych
+                $files = [];
+                foreach ($uploadedFiles as $fileId) {
+                    // Jeśli nie podano thread_id, tworzymy tymczasowy wątek
+                    if (!$threadId) {
+                        // Sprawdzamy, czy istnieje jakiś wątek dla tego asystenta
+                        $thread = $this->threads()->first();
+                        
+                        if (!$thread) {
+                            // Jeśli nie ma żadnego wątku, tworzymy tymczasowy wątek systemowy
+                            $thread = $this->threads()->create([
+                                'uuid' => uniqid('system_'),
+                                'model_id' => 0,
+                                'model_type' => 'System',
+                            ]);
+                        }
+                        
+                        $threadId = $thread->id;
+                    }
+                    
+                    // Zapisujemy plik w bazie danych
+                    $file = File::create([
+                        'openai_file_id' => $fileId,
+                        'assistant_id' => $this->id,
+                        'thread_id' => $threadId,
+                    ]);
+                    
+                    $files[] = $file;
+                }
+                
+                return [
+                    'success' => true,
+                    'message' => 'Wiedza asystenta została zaktualizowana.',
+                    'files_added' => count($files),
+                    'vector_store_id' => $vectorStore->id,
+                    'errors' => $errors,
+                ];
+            } catch (\Exception $e) {
+                // Usuwamy przesłane pliki, jeśli nie udało się utworzyć vector store
+                foreach ($uploadedFiles as $fileId) {
+                    try {
+                        $client->files()->delete($fileId);
+                    } catch (\Exception $deleteException) {
+                        Log::warning("Nie udało się usunąć pliku {$fileId}: " . $deleteException->getMessage());
+                    }
+                }
+                
+                Log::error('Błąd podczas tworzenia vector store: ' . $e->getMessage());
+                
+                return [
+                    'success' => false,
+                    'message' => 'Wystąpił błąd podczas tworzenia vector store.',
+                    'error' => $e->getMessage(),
+                ];
+            }
         } catch (\Exception $e) {
             ray($e->getMessage());
             Log::error('Błąd podczas aktualizacji wiedzy asystenta: ' . $e->getMessage());
@@ -397,6 +553,84 @@ class Assistant extends Model
                 'message' => 'Wystąpił błąd podczas aktualizacji wiedzy asystenta.',
                 'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Pobiera vector store asystenta.
+     * 
+     * @return array|null Informacje o vector store lub null, jeśli nie znaleziono
+     */
+    public function getVectorStore(): ?array
+    {
+        try {
+            // Sprawdzamy, czy openai_assistant_id istnieje
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Próba pobrania vector store asystenta bez openai_assistant_id');
+                return null;
+            }
+            
+            $client = \OpenAI::client(config('openai.api_key'));
+            
+            // Jeśli mamy zapisany vector_store_id, używamy go
+            if (!empty($this->vector_store_id)) {
+                try {
+                    // Pobieramy vector store
+                    $vectorStore = $client->vectorStores()->retrieve($this->vector_store_id);
+                    
+                    // Pobieramy pliki vector store
+                    $files = $client->vectorStores()->files()->list($this->vector_store_id);
+                    
+                    $vectorStoreArray = json_decode(json_encode($vectorStore), true);
+                    
+                    return [
+                        'id' => $vectorStore->id,
+                        'name' => $vectorStore->name,
+                        'created_at' => isset($vectorStoreArray['created_at']) ? date('Y-m-d H:i:s', $vectorStoreArray['created_at']) : null,
+                        'file_count' => count($files->data),
+                        'files' => $files->data,
+                    ];
+                } catch (\Exception $e) {
+                    // Jeśli vector store nie istnieje, usuwamy vector_store_id z bazy danych
+                    if (strpos($e->getMessage(), 'not found') !== false) {
+                        $this->vector_store_id = null;
+                        $this->saveQuietly();
+                    }
+                    
+                    Log::warning('Nie udało się pobrać vector store o ID ' . $this->vector_store_id . ': ' . $e->getMessage());
+                }
+            }
+            
+            // Jeśli nie mamy zapisanego vector_store_id lub wystąpił błąd, szukamy vector store dla tego asystenta
+            $vectorStores = $client->vectorStores()->list();
+            
+            // Szukamy vector store dla tego asystenta
+            foreach ($vectorStores->data as $vectorStore) {
+                if (isset($vectorStore->metadata['assistant_id']) && $vectorStore->metadata['assistant_id'] === $this->openai_assistant_id) {
+                    // Pobieramy pliki vector store
+                    $files = $client->vectorStores()->files()->list($vectorStore->id);
+                    
+                    $vectorStoreArray = json_decode(json_encode($vectorStore), true);
+                    
+                    // Zapisujemy vector_store_id w bazie danych
+                    $this->vector_store_id = $vectorStore->id;
+                    $this->saveQuietly();
+                    
+                    return [
+                        'id' => $vectorStore->id,
+                        'name' => $vectorStore->name,
+                        'created_at' => isset($vectorStoreArray['created_at']) ? date('Y-m-d H:i:s', $vectorStoreArray['created_at']) : null,
+                        'file_count' => count($files->data),
+                        'files' => $files->data,
+                    ];
+                }
+            }
+            
+            return null;
+        } catch (\Exception $e) {
+            ray($e->getMessage());
+            Log::error('Błąd podczas pobierania vector store asystenta: ' . $e->getMessage());
+            return null;
         }
     }
 }
