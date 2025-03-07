@@ -318,4 +318,39 @@ class Assistant extends Model
         
         return $result;
     }
+
+    /**
+     * Aktualizuje wiedzę asystenta poprzez usunięcie wszystkich plików i dodanie nowych.
+     * To efektywnie tworzy nowy vector store w OpenAI.
+     * 
+     * @param array $paths Tablica ścieżek do nowych plików
+     * @param int|null $threadId ID wątku (opcjonalne)
+     * @return array Tablica z informacjami o rezultacie operacji
+     */
+    public function updateKnowledge(array $paths, ?int $threadId = null): array
+    {
+        try {
+            // Resetujemy pliki asystenta (usuwa wszystkie pliki i vector store)
+            $this->resetFiles();
+            
+            // Dodajemy nowe pliki (tworzy nowy vector store)
+            $result = $this->attachFiles($paths, $threadId);
+            
+            return [
+                'success' => true,
+                'message' => 'Wiedza asystenta została zaktualizowana.',
+                'files_added' => count($result['files']),
+                'errors' => $result['errors'],
+            ];
+        } catch (\Exception $e) {
+            ray($e->getMessage());
+            Log::error('Błąd podczas aktualizacji wiedzy asystenta: ' . $e->getMessage());
+            
+            return [
+                'success' => false,
+                'message' => 'Wystąpił błąd podczas aktualizacji wiedzy asystenta.',
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
 }

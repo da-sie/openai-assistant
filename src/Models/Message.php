@@ -68,31 +68,49 @@ class Message extends Model
                 self::run($message);
             } catch (\Exception $e) {
                 ray($e->getMessage());
-                event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+                // Używamy thread->assistant zamiast this->assistant
+                if ($message->thread && $message->thread->assistant) {
+                    event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+                }
             }
         });
     }
 
     public static function run($message): void
     {
-        // Spróbuj załadować relację assistant
-        $message->load('assistant');
-
-        $client = \OpenAI::client(config('openai.api_key'));
-
-        $response = $client
-            ->threads()
-            ->runs()
-            ->create(
-                threadId: $message->thread->openai_thread_id,
-                parameters: [
-                    'assistant_id' => $message->assistant->openai_assistant_id,
-                ]
-            );
-        $message->openai_run_id = $response->id;
-        $message->saveQuietly();
-
-        AssistantRequestJob::dispatch($message->id);
+        try {
+            // Upewnij się, że relacja thread jest załadowana
+            if (!$message->relationLoaded('thread')) {
+                $message->load('thread');
+            }
+            
+            // Upewnij się, że relacja thread.assistant jest załadowana
+            if (!$message->thread->relationLoaded('assistant')) {
+                $message->thread->load('assistant');
+            }
+            
+            $client = \OpenAI::client(config('openai.api_key'));
+            
+            $response = $client
+                ->threads()
+                ->runs()
+                ->create(
+                    threadId: $message->thread->openai_thread_id,
+                    parameters: [
+                        'assistant_id' => $message->thread->assistant->openai_assistant_id,
+                    ]
+                );
+            $message->openai_run_id = $response->id;
+            $message->saveQuietly();
+            
+            AssistantRequestJob::dispatch($message->id);
+        } catch (\Exception $e) {
+            ray($e->getMessage());
+            // Używamy thread->assistant zamiast this->assistant
+            if ($message->thread && $message->thread->assistant) {
+                event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+            }
+        }
     }
 
     public function assistant(): BelongsTo

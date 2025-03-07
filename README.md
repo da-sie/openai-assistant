@@ -269,4 +269,58 @@ $files = $assistant->getOpenAIFiles();
 
 The returned array contains detailed information about each file:
 
+### Updating Assistant Knowledge
+
+When you need to update the assistant's knowledge base with new information, you can use the `updateKnowledge` method. This method effectively creates a new vector store by removing all existing files and adding new ones:
+
+```php
+$result = $assistant->updateKnowledge([$path1, $path2, $path3]);
+```
+
+The method returns detailed information about the operation:
+
+```php
+[
+    'success' => true,
+    'message' => 'Wiedza asystenta została zaktualizowana.',
+    'files_added' => 2,
+    'errors' => [
+        [
+            'path' => '/path/to/file3.pdf',
+            'message' => 'File not found'
+        ]
+    ]
+]
+```
+
+You can also specify a thread to associate the files with:
+
+```php
+$result = $assistant->updateKnowledge([$path1, $path2, $path3], $threadId);
+```
+
+This method is particularly useful when:
+- You have new versions of documents that replace old ones
+- You need to completely refresh the assistant's knowledge base
+- You want to ensure the vector store is rebuilt from scratch
+
+Under the hood, this method:
+1. Calls `resetFiles()` to remove all existing files from OpenAI and your database
+2. Calls `attachFiles()` to add the new files
+3. OpenAI automatically creates a new vector store with the new files
+
+#### About Vector Stores in OpenAI
+
+When you add files to an assistant, OpenAI automatically:
+- Parses the content of the files
+- Chunks the content into smaller pieces
+- Creates embeddings for each chunk
+- Builds a vector store for efficient semantic search
+
+This process happens transparently, without requiring you to manually manage embeddings or vector databases. When your assistant receives a query, it can search this vector store to find relevant information from your files.
+
+Updating the vector store is as simple as updating the files attached to your assistant. The `updateKnowledge` method provides a convenient way to completely refresh the vector store when you have significant changes to your knowledge base.
+
+This approach allows you to handle errors gracefully without stopping the entire process.
+
 ## License
