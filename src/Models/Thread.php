@@ -13,13 +13,35 @@ use Illuminate\Support\Facades\Log;
 class Thread extends Model
 {
     protected $guarded = [];
-    
+
     public function __construct(array $attributes = [])
     {
         parent::__construct($attributes);
         $this->setTable(config('openai-assistant.table.threads'));
     }
-    
+
+    protected static function booted()
+    {
+        static::created(function ($thread) {
+            try {
+                $assistant = $thread->assistant;
+                $client = \OpenAI::client(config('openai.api_key'));
+                $response = $client->threads()->create([]);
+
+                $thread->openai_thread_id = $response->id;
+                $thread->saveQuietly();
+            } catch (\Exception $e) {
+                Log::error('Błąd podczas tworzenia wątku: ' . $e->getMessage(), [
+                    'exception' => $e,
+                    'assistant_id' => $assistant->id,
+                ]);
+
+                throw $e;
+            }
+        });
+    }
+
+
     /**
      * Tworzy nową wiadomość w wątku i wysyła ją do OpenAI
      * 
@@ -31,24 +53,24 @@ class Thread extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Parametry wiadomości
             $parameters = [
                 'role' => 'user',
                 'content' => $content,
             ];
-            
+
             // Dodaj pliki, jeśli są
             if (!empty($fileIds)) {
                 $parameters['file_ids'] = $fileIds;
             }
-            
+
             // Wyślij wiadomość do OpenAI
             $response = $client->threads()->messages()->create(
                 threadId: $this->openai_thread_id,
                 parameters: $parameters
             );
-            
+
             // Utwórz lokalny rekord wiadomości
             $message = new Message([
                 'thread_id' => $this->id,
@@ -57,9 +79,9 @@ class Thread extends Model
                 'openai_message_id' => $response->id,
                 'file_ids' => $fileIds,
             ]);
-            
+
             $message->save();
-            
+
             return $message;
         } catch (\Exception $e) {
             Log::error('Błąd podczas tworzenia wiadomości: ' . $e->getMessage(), [
@@ -67,11 +89,11 @@ class Thread extends Model
                 'thread_id' => $this->id,
                 'openai_thread_id' => $this->openai_thread_id,
             ]);
-            
+
             throw $e;
         }
     }
-    
+
     /**
      * Uruchamia asystenta dla wątku i zwraca odpowiedź (bez streamingu)
      * 
@@ -85,13 +107,13 @@ class Thread extends Model
             if (!$this->relationLoaded('assistant')) {
                 $this->load('assistant');
             }
-            
+
             if (!$this->assistant || !$this->assistant->openai_assistant_id) {
                 throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
             }
-            
+
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Uruchom wątek
             $run = $client->threads()->runs()->create(
                 threadId: $this->openai_thread_id,
@@ -99,26 +121,26 @@ class Thread extends Model
                     'assistant_id' => $this->assistant->openai_assistant_id,
                 ]
             );
-            
+
             // Czekaj na zakończenie uruchomienia
             $status = $run->status;
             $runId = $run->id;
-            
+
             while (in_array($status, ['queued', 'in_progress', 'cancelling'])) {
                 sleep(1); // Krótka przerwa, aby nie przeciążać API
-                
+
                 $run = $client->threads()->runs()->retrieve(
                     threadId: $this->openai_thread_id,
                     runId: $runId
                 );
-                
+
                 $status = $run->status;
-                
+
                 // Obsługa wymaganych akcji narzędzi
                 if ($status === 'requires_action' && isset($run->requiredAction)) {
                     $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
                     $toolOutputs = [];
-                    
+
                     // Tutaj można dodać logikę obsługi różnych narzędzi
                     foreach ($toolCalls as $toolCall) {
                         // Przykładowa implementacja
@@ -127,7 +149,7 @@ class Thread extends Model
                             'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
                         ];
                     }
-                    
+
                     // Prześlij wyniki narzędzi
                     $run = $client->threads()->runs()->submitToolOutputs(
                         threadId: $this->openai_thread_id,
@@ -136,11 +158,11 @@ class Thread extends Model
                             'tool_outputs' => $toolOutputs,
                         ]
                     );
-                    
+
                     $status = $run->status;
                 }
             }
-            
+
             // Pobierz wiadomości po zakończeniu uruchomienia
             if ($status === 'completed') {
                 $messages = $client->threads()->messages()->list(
@@ -150,7 +172,7 @@ class Thread extends Model
                         'after' => $message->openai_message_id
                     ]
                 );
-                
+
                 // Znajdź pierwszą wiadomość od asystenta
                 $assistantMessage = null;
                 foreach ($messages->data as $msg) {
@@ -159,7 +181,7 @@ class Thread extends Model
                         break;
                     }
                 }
-                
+
                 if ($assistantMessage) {
                     // Zapisz odpowiedź w bazie danych
                     $content = '';
@@ -168,19 +190,19 @@ class Thread extends Model
                             $content .= $contentPart->text->value;
                         }
                     }
-                    
+
                     $message->response = $content;
                     $message->run_status = 'completed';
                     $message->saveQuietly();
-                    
+
                     return $message;
                 }
             }
-            
+
             // Obsługa innych statusów zakończenia
             $message->run_status = $status;
             $message->saveQuietly();
-            
+
             return $message;
         } catch (\Exception $e) {
             // Loguj błąd
@@ -190,15 +212,15 @@ class Thread extends Model
                 'openai_thread_id' => $this->openai_thread_id,
                 'message_id' => $message->id,
             ]);
-            
+
             // Aktualizuj status wiadomości
             $message->run_status = 'failed';
             $message->saveQuietly();
-            
+
             throw $e;
         }
     }
-    
+
     /**
      * Uruchamia wątek z asystentem i streamuje odpowiedź
      * 
@@ -213,19 +235,20 @@ class Thread extends Model
             if (!$this->relationLoaded('assistant')) {
                 $this->load('assistant');
             }
-            
+
             if (!$this->assistant || !$this->assistant->openai_assistant_id) {
                 throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
             }
-            
+
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Uruchom wątek ze streamingiem
             $stream = $client->threads()->runs()->createStreamed(
                 threadId: $this->openai_thread_id,
                 parameters: [
                     'assistant_id' => $this->assistant->openai_assistant_id,
-                ]);
+                ]
+            );
 
             // Inicjalizacja zmiennej $run przed pętlą
             $run = null;
@@ -235,7 +258,7 @@ class Thread extends Model
                 foreach ($stream as $response) {
                     // Logowanie dla debugowania
                     Log::debug('OpenAI event: ' . $response->event);
-                    
+
                     switch ($response->event) {
                         case 'thread.run.created':
                         case 'thread.run.queued':
@@ -257,12 +280,12 @@ class Thread extends Model
                             break;
                         case 'thread.run.requires_action':
                             $run = $response->response;
-                            
+
                             // Obsługa wymaganych akcji narzędzi
                             if (isset($run->requiredAction) && isset($run->requiredAction->submitToolOutputs)) {
                                 $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
                                 $toolOutputs = [];
-                                
+
                                 // Tutaj można dodać logikę obsługi różnych narzędzi
                                 foreach ($toolCalls as $toolCall) {
                                     // Przykładowa implementacja - w rzeczywistości powinna być bardziej rozbudowana
@@ -272,7 +295,7 @@ class Thread extends Model
                                         'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
                                     ];
                                 }
-                                
+
                                 // Nadpisz strumień nowym strumieniem po przesłaniu wyników narzędzi
                                 $stream = $client->threads()->runs()->submitToolOutputsStreamed(
                                     threadId: $run->threadId,
@@ -286,10 +309,12 @@ class Thread extends Model
                         case 'thread.message.created':
                         case 'thread.message.delta':
                             // Obsługa wiadomości w trakcie streamingu
-                            if ($response->event === 'thread.message.delta' && 
-                                isset($response->response->delta) && 
-                                isset($response->response->delta->content)) {
-                                
+                            if (
+                                $response->event === 'thread.message.delta' &&
+                                isset($response->response->delta) &&
+                                isset($response->response->delta->content)
+                            ) {
+
                                 foreach ($response->response->delta->content as $content) {
                                     if ($content->type === 'text' && isset($content->text->value)) {
                                         // Wywołaj callback z fragmentem odpowiedzi
@@ -301,7 +326,7 @@ class Thread extends Model
                     }
                 }
             } while ($run && !$runCompleted);
-            
+
             // Pobierz wiadomości po zakończeniu uruchomienia
             if ($run && ($run->status === "completed" || $runCompleted)) {
                 try {
@@ -313,7 +338,7 @@ class Thread extends Model
                             'after' => $message->openai_message_id // Pobierz tylko wiadomości po ostatniej wysłanej
                         ]
                     );
-                    
+
                     // Znajdź pierwszą wiadomość od asystenta
                     $assistantMessage = null;
                     foreach ($messages->data as $msg) {
@@ -322,14 +347,14 @@ class Thread extends Model
                             break;
                         }
                     }
-                    
+
                     if ($assistantMessage) {
                         // Zapisz odpowiedź w bazie danych
                         $content = '';
                         foreach ($assistantMessage->content as $contentPart) {
                             if ($contentPart->type === 'text') {
                                 $content .= $contentPart->text->value;
-                                
+
                                 // Wywołaj callback z fragmentem odpowiedzi, jeśli nie było to już obsłużone w streamingu
                                 $streamCallback($contentPart->text->value, $message);
                             } elseif ($contentPart->type === 'image') {
@@ -338,12 +363,12 @@ class Thread extends Model
                                 // Możesz dodać dodatkową logikę obsługi obrazów
                             }
                         }
-                        
+
                         // Zapisz odpowiedź i zaktualizuj status
                         $message->response = $content;
                         $message->run_status = 'completed';
                         $message->saveQuietly();
-                        
+
                         // Oznacz zakończenie streamingu
                         $streamCallback(null, $message, true);
                     } else {
@@ -374,7 +399,6 @@ class Thread extends Model
                 $message->saveQuietly();
                 $streamCallback(null, $message, true, new \Exception("Nie udało się utworzyć run"));
             }
-                                
         } catch (\Exception $e) {
             // Loguj błąd
             Log::error('Błąd podczas streamowania odpowiedzi: ' . $e->getMessage(), [
@@ -383,62 +407,16 @@ class Thread extends Model
                 'openai_thread_id' => $this->openai_thread_id,
                 'message_id' => $message->id ?? null,
             ]);
-            
+
             // Aktualizuj status wiadomości
             $message->run_status = 'failed';
             $message->saveQuietly();
-            
+
             // Wywołaj callback z informacją o błędzie
             $streamCallback(null, $message, true, $e);
         }
     }
-    
-    /**
-     * Tworzy nowy wątek w OpenAI i zapisuje go w bazie danych
-     * 
-     * @param Assistant $assistant Asystent, do którego ma być przypisany wątek
-     * @param array $metadata Opcjonalne metadane wątku
-     * @return Thread Utworzony wątek
-     */
-    public static function createWithOpenAI(Assistant $assistant, array $metadata = []): Thread
-    {
-        try {
-            $client = \OpenAI::client(config('openai.api_key'));
-            
-            // Parametry wątku
-            $parameters = [];
-            
-            // Dodaj metadane, jeśli są
-            if (!empty($metadata)) {
-                $parameters['metadata'] = $metadata;
-            }
-            
-            // Utwórz wątek w OpenAI
-            $response = $client->threads()->create($parameters);
-            
-            // Utwórz lokalny rekord wątku
-            $thread = new Thread([
-                'assistant_id' => $assistant->id,
-                'openai_thread_id' => $response->id,
-                'metadata' => $metadata,
-            ]);
-            
-            $thread->save();
-            
-            // Załaduj relację asystenta
-            $thread->setRelation('assistant', $assistant);
-            
-            return $thread;
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas tworzenia wątku: ' . $e->getMessage(), [
-                'exception' => $e,
-                'assistant_id' => $assistant->id,
-            ]);
-            
-            throw $e;
-        }
-    }
-    
+
     /**
      * Dodaje plik do wątku w OpenAI
      * 
@@ -449,7 +427,7 @@ class Thread extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Dodaj plik do wątku
             $response = $client->threads()->messages()->files()->create(
                 threadId: $this->openai_thread_id,
@@ -457,7 +435,7 @@ class Thread extends Model
                     'file_id' => $fileId,
                 ]
             );
-            
+
             return $response->id;
         } catch (\Exception $e) {
             Log::error('Błąd podczas dodawania pliku do wątku: ' . $e->getMessage(), [
@@ -466,11 +444,11 @@ class Thread extends Model
                 'openai_thread_id' => $this->openai_thread_id,
                 'file_id' => $fileId,
             ]);
-            
+
             throw $e;
         }
     }
-    
+
     /**
      * Pobiera listę plików przypisanych do wątku
      * 
@@ -480,12 +458,12 @@ class Thread extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Pobierz pliki wątku
             $response = $client->threads()->messages()->files()->list(
                 threadId: $this->openai_thread_id
             );
-            
+
             return $response->data;
         } catch (\Exception $e) {
             Log::error('Błąd podczas pobierania plików wątku: ' . $e->getMessage(), [
@@ -493,11 +471,11 @@ class Thread extends Model
                 'thread_id' => $this->id,
                 'openai_thread_id' => $this->openai_thread_id,
             ]);
-            
+
             throw $e;
         }
     }
-    
+
     /**
      * Usuwa plik z wątku
      * 
@@ -508,13 +486,13 @@ class Thread extends Model
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
-            
+
             // Usuń plik z wątku
             $client->threads()->messages()->files()->delete(
                 threadId: $this->openai_thread_id,
                 fileId: $fileId
             );
-            
+
             return true;
         } catch (\Exception $e) {
             Log::error('Błąd podczas usuwania pliku z wątku: ' . $e->getMessage(), [
@@ -523,11 +501,11 @@ class Thread extends Model
                 'openai_thread_id' => $this->openai_thread_id,
                 'file_id' => $fileId,
             ]);
-            
+
             return false;
         }
     }
-    
+
     /**
      * Relacja do asystenta
      */
@@ -535,7 +513,7 @@ class Thread extends Model
     {
         return $this->belongsTo(Assistant::class);
     }
-    
+
     /**
      * Relacja do wiadomości
      */
@@ -543,4 +521,4 @@ class Thread extends Model
     {
         return $this->hasMany(Message::class);
     }
-} 
+}
