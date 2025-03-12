@@ -18,6 +18,7 @@
     "require": {
         "php": "^8.1",
         "spatie/laravel-package-tools": "^1.14.0",
+        "openai-php/client": "^0.10.0",
         "openai-php/laravel": "^0.10.3",
         "illuminate/contracts": "^10.0"
     },
@@ -25,7 +26,8 @@
         "laravel/pint": "^1.0",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^7.8",
-        "orchestra/testbench": "^8.8",
+        "orchestra/testbench": "^8.34",
+        "vlucas/phpdotenv": "^5.4",
         "pestphp/pest": "^2.36",
         "pestphp/pest-plugin-arch": "^2.5",
         "pestphp/pest-plugin-laravel": "^2.0",
@@ -40,8 +42,7 @@
     "autoload-dev": {
         "psr-4": {
             "DaSie\\Openaiassistant\\Tests\\": "tests/",
-            "Workbench\\App\\": "workbench/app/",
-            "Tests\\": "tests/"
+            "Workbench\\App\\": "workbench/app/"
         }
     },
     "scripts": {
@@ -59,6 +60,7 @@
         ],
         "analyse": "vendor/bin/phpstan analyse",
         "test": "vendor/bin/pest",
+        "test-filter": "vendor/bin/pest --filter",
         "test-coverage": "vendor/bin/pest --coverage",
         "format": "vendor/bin/pint"
     },

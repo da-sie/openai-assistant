@@ -25,16 +25,51 @@ class Thread extends Model
         static::created(function ($thread) {
             try {
                 $assistant = $thread->assistant;
+                
+                Log::info('Próba utworzenia wątku:', [
+                    'thread_id' => $thread->id,
+                    'assistant' => $assistant ? [
+                        'id' => $assistant->id,
+                        'openai_assistant_id' => $assistant->openai_assistant_id,
+                        'name' => $assistant->name
+                    ] : null
+                ]);
+                
                 $client = \OpenAI::client(config('openai.api_key'));
-                $response = $client->threads()->create([]);
+
+                if (!$assistant || !$assistant->openai_assistant_id) {
+                    throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
+                }
+
+                // Utwórz wątek w OpenAI
+                Log::info('Wysyłanie żądania do OpenAI...');
+                
+                $response = $client->threads()->create([
+                    'messages' => []
+                ]);
+
+                Log::info('Odpowiedź z OpenAI:', [
+                    'response' => $response ? json_decode(json_encode($response), true) : null
+                ]);
+
+                if (!$response || !isset($response->id)) {
+                    throw new \Exception('Nie udało się utworzyć wątku w OpenAI');
+                }
 
                 $thread->openai_thread_id = $response->id;
                 $thread->status = 'created';
                 $thread->saveQuietly();
+
+                Log::info('Wątek utworzony pomyślnie:', [
+                    'thread_id' => $response->id,
+                    'assistant_id' => $assistant->openai_assistant_id,
+                    'status' => $thread->status
+                ]);
             } catch (\Exception $e) {
                 Log::error('Błąd podczas tworzenia wątku: ' . $e->getMessage(), [
                     'exception' => $e,
-                    'assistant_id' => $assistant->id,
+                    'assistant_id' => $assistant->id ?? null,
+                    'trace' => $e->getTraceAsString()
                 ]);
 
                 throw $e;
@@ -101,11 +136,47 @@ class Thread extends Model
 
             $client = \OpenAI::client(config('openai.api_key'));
 
+            // Sprawdź aktywne runy
+            $runs = $client->threads()->runs()->list(
+                threadId: $this->openai_thread_id,
+                parameters: [
+                    'limit' => 1,
+                    'order' => 'desc'
+                ]
+            );
+
+            if (!empty($runs->data)) {
+                $latestRun = $runs->data[0];
+                if (in_array($latestRun->status, ['queued', 'in_progress', 'requires_action'])) {
+                    // Poczekaj na zakończenie aktywnego runa
+                    while (in_array($latestRun->status, ['queued', 'in_progress', 'requires_action'])) {
+                        sleep(1);
+                        $latestRun = $client->threads()->runs()->retrieve(
+                            threadId: $this->openai_thread_id,
+                            runId: $latestRun->id
+                        );
+                    }
+                }
+            }
+
+            // Dodaj wiadomość do wątku
+            $messageResponse = $client->threads()->messages()->create(
+                threadId: $this->openai_thread_id,
+                parameters: [
+                    'role' => 'user',
+                    'content' => $message->prompt
+                ]
+            );
+
+            $message->openai_message_id = $messageResponse->id;
+            $message->saveQuietly();
+
             // Uruchom wątek
             $run = $client->threads()->runs()->create(
                 threadId: $this->openai_thread_id,
                 parameters: [
                     'assistant_id' => $this->assistant->openai_assistant_id,
+                    'instructions' => 'Przeszukaj dostępne pliki, aby znaleźć odpowiedź na pytanie. Odpowiedz tylko na podstawie znalezionych informacji, nie dodawaj własnych domysłów. Odpowiedź powinna być zwięzła i zawierać wszystkie istotne szczegóły z wyszukanych dokumentów.'
                 ]
             );
 
@@ -113,40 +184,73 @@ class Thread extends Model
             $status = $run->status;
             $runId = $run->id;
 
-            while (in_array($status, ['queued', 'in_progress', 'cancelling'])) {
+            while (in_array($status, ['queued', 'in_progress', 'cancelling', 'requires_action'])) {
                 sleep(1); // Krótka przerwa, aby nie przeciążać API
 
-                $run = $client->threads()->runs()->retrieve(
-                    threadId: $this->openai_thread_id,
-                    runId: $runId
-                );
-
-                $status = $run->status;
-
-                // Obsługa wymaganych akcji narzędzi
-                if ($status === 'requires_action' && isset($run->requiredAction)) {
-                    $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
-                    $toolOutputs = [];
-
-                    // Tutaj można dodać logikę obsługi różnych narzędzi
-                    foreach ($toolCalls as $toolCall) {
-                        // Przykładowa implementacja
-                        $toolOutputs[] = [
-                            'tool_call_id' => $toolCall->id,
-                            'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
-                        ];
-                    }
-
-                    // Prześlij wyniki narzędzi
-                    $run = $client->threads()->runs()->submitToolOutputs(
+                try {
+                    $run = $client->threads()->runs()->retrieve(
                         threadId: $this->openai_thread_id,
-                        runId: $runId,
-                        parameters: [
-                            'tool_outputs' => $toolOutputs,
-                        ]
+                        runId: $runId
                     );
 
+                    if (!is_object($run)) {
+                        Log::error('Nieprawidłowa odpowiedź z OpenAI:', [
+                            'run' => $run,
+                            'thread_id' => $this->openai_thread_id,
+                            'run_id' => $runId
+                        ]);
+                        throw new \Exception('Nieprawidłowa odpowiedź z OpenAI');
+                    }
+
                     $status = $run->status;
+                    ray('Status uruchomienia:', [
+                        'status' => $status,
+                        'run_id' => $runId,
+                        'required_action' => $run->required_action ?? null,
+                        'last_error' => $run->last_error ?? null
+                    ]);
+
+                    // Obsługa wymaganych akcji narzędzi
+                    if ($status === 'requires_action' && isset($run->requiredAction)) {
+                        $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
+                        $toolOutputs = [];
+
+                        // Tutaj można dodać logikę obsługi różnych narzędzi
+                        foreach ($toolCalls as $toolCall) {
+                            // Przykładowa implementacja
+                            $toolOutputs[] = [
+                                'tool_call_id' => $toolCall->id,
+                                'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
+                            ];
+                        }
+
+                        // Prześlij wyniki narzędzi
+                        $run = $client->threads()->runs()->submitToolOutputs(
+                            threadId: $this->openai_thread_id,
+                            runId: $runId,
+                            parameters: [
+                                'tool_outputs' => $toolOutputs,
+                            ]
+                        );
+
+                        if (!is_object($run)) {
+                            Log::error('Nieprawidłowa odpowiedź z OpenAI po submitToolOutputs:', [
+                                'run' => $run,
+                                'thread_id' => $this->openai_thread_id,
+                                'run_id' => $runId
+                            ]);
+                            throw new \Exception('Nieprawidłowa odpowiedź z OpenAI po submitToolOutputs');
+                        }
+
+                        $status = $run->status;
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Błąd podczas sprawdzania statusu runa: ' . $e->getMessage(), [
+                        'exception' => $e,
+                        'thread_id' => $this->openai_thread_id,
+                        'run_id' => $runId
+                    ]);
+                    throw $e;
                 }
             }
 
@@ -407,89 +511,93 @@ class Thread extends Model
     /**
      * Dodaje plik do wątku w OpenAI
      * 
-     * @param string $fileId Identyfikator pliku w OpenAI
-     * @return string Identyfikator załącznika w wątku
+     * @param string $fileId ID pliku w OpenAI
+     * @return void
      */
-    public function addFile(string $fileId): string
+    public function attachFile(string $fileId): void
     {
         try {
             $client = \OpenAI::client(config('openai.api_key'));
 
+            // Pobierz aktualną konfigurację asystenta
+            $assistant = $this->assistant;
+            $currentAssistant = $client->assistants()->retrieve($assistant->openai_assistant_id);
+            $currentFileIds = $currentAssistant->file_ids ?? [];
+            
+            // Dodaj nowy plik do listy istniejących plików
+            if (!in_array($fileId, $currentFileIds)) {
+                $currentFileIds[] = $fileId;
+            }
+
+            // Zaktualizuj asystenta z nową listą plików
+            $assistantResponse = $client->assistants()->modify($assistant->openai_assistant_id, [
+                'file_ids' => $currentFileIds,
+                'tools' => [
+                    ['type' => 'file_search']
+                ]
+            ]);
+
+            ray('Plik dodany do asystenta:', [
+                'assistant_id' => $assistant->openai_assistant_id,
+                'file_id' => $fileId,
+                'all_files' => $currentFileIds
+            ]);
+
             // Dodaj plik do wątku
-            $response = $client->threads()->messages()->files()->create(
+            $messageResponse = $client->threads()->messages()->create(
                 threadId: $this->openai_thread_id,
                 parameters: [
-                    'file_id' => $fileId,
+                    'role' => 'user',
+                    'content' => 'Załączam plik do analizy. Proszę przeanalizować jego zawartość.',
+                    'metadata' => [
+                        'file_id' => $fileId
+                    ]
                 ]
             );
 
-            return $response->id;
+            ray('Wiadomość dodana do wątku:', [
+                'message_id' => $messageResponse->id,
+                'thread_id' => $this->openai_thread_id,
+                'file_id' => $fileId
+            ]);
+
+            // Uruchom asystenta, aby przetworzyć plik
+            $run = $client->threads()->runs()->create(
+                threadId: $this->openai_thread_id,
+                parameters: [
+                    'assistant_id' => $assistant->openai_assistant_id,
+                    'instructions' => 'Przeanalizuj załączony plik i potwierdź jego zawartość.'
+                ]
+            );
+
+            ray('Uruchomiono asystenta:', [
+                'run_id' => $run->id,
+                'status' => $run->status
+            ]);
+
+            // Poczekaj na zakończenie przetwarzania
+            $status = $run->status;
+            while (in_array($status, ['queued', 'in_progress', 'requires_action'])) {
+                sleep(1);
+                $run = $client->threads()->runs()->retrieve(
+                    threadId: $this->openai_thread_id,
+                    runId: $run->id
+                );
+                $status = $run->status;
+            }
+
+            ray('Zakończono przetwarzanie pliku:', [
+                'status' => $status
+            ]);
         } catch (\Exception $e) {
             Log::error('Błąd podczas dodawania pliku do wątku: ' . $e->getMessage(), [
                 'exception' => $e,
                 'thread_id' => $this->id,
                 'openai_thread_id' => $this->openai_thread_id,
-                'file_id' => $fileId,
+                'file_id' => $fileId
             ]);
 
             throw $e;
-        }
-    }
-
-    /**
-     * Pobiera listę plików przypisanych do wątku
-     * 
-     * @return array Lista plików
-     */
-    public function getFiles(): array
-    {
-        try {
-            $client = \OpenAI::client(config('openai.api_key'));
-
-            // Pobierz pliki wątku
-            $response = $client->threads()->messages()->files()->list(
-                threadId: $this->openai_thread_id
-            );
-
-            return $response->data;
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas pobierania plików wątku: ' . $e->getMessage(), [
-                'exception' => $e,
-                'thread_id' => $this->id,
-                'openai_thread_id' => $this->openai_thread_id,
-            ]);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * Usuwa plik z wątku
-     * 
-     * @param string $fileId Identyfikator pliku w wątku
-     * @return bool Czy operacja się powiodła
-     */
-    public function removeFile(string $fileId): bool
-    {
-        try {
-            $client = \OpenAI::client(config('openai.api_key'));
-
-            // Usuń plik z wątku
-            $client->threads()->messages()->files()->delete(
-                threadId: $this->openai_thread_id,
-                fileId: $fileId
-            );
-
-            return true;
-        } catch (\Exception $e) {
-            Log::error('Błąd podczas usuwania pliku z wątku: ' . $e->getMessage(), [
-                'exception' => $e,
-                'thread_id' => $this->id,
-                'openai_thread_id' => $this->openai_thread_id,
-                'file_id' => $fileId,
-            ]);
-
-            return false;
         }
     }
 

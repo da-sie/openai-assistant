@@ -21,6 +21,7 @@ return new class extends Migration
                 $table->text('instructions')->nullable();
                 $table->string('engine')->default('gpt-3.5-turbo');
                 $table->string('vector_store_id')->nullable();
+                $table->json('tools')->nullable();
                 $table->timestamps();
             });
         }
@@ -29,10 +30,11 @@ return new class extends Migration
             Schema::create('ai_threads', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('assistant_id')->constrained('ai_assistants');
-                $table->string('openai_thread_id');
+                $table->string('openai_thread_id')->nullable();
                 $table->string('uuid')->unique();
                 $table->morphs('model');
                 $table->json('metadata')->nullable();
+                $table->string('status')->default('created');
                 $table->timestamps();
             });
         }

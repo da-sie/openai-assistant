@@ -2,10 +2,14 @@
 
 namespace Tests;
 
+namespace DaSie\Openaiassistant\Tests;
+
 use DaSie\Openaiassistant\OpenaiAssistantServiceProvider;
 use Orchestra\Testbench\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Config;
 use Mockery;
+use Dotenv\Dotenv;
+use Illuminate\Support\Facades\Ray;
 
 class TestCase extends BaseTestCase
 {
@@ -16,12 +20,18 @@ class TestCase extends BaseTestCase
     {
         parent::setUp();
         
+        // Ładowanie zmiennych środowiskowych z .env.testing
+        if (file_exists(__DIR__.'/../.env.testing')) {
+            (Dotenv::createImmutable(__DIR__.'/../', '.env.testing'))->load();
+            var_dump('OPENAI_API_KEY from env: ' . env('OPENAI_API_KEY'));
+        }
+        
         // Ustawienia konfiguracyjne dla testów
         Config::set('openai-assistant.table.assistants', 'ai_assistants');
         Config::set('openai-assistant.table.files', 'ai_files');
         Config::set('openai-assistant.table.threads', 'ai_threads');
         Config::set('openai-assistant.table.messages', 'ai_messages');
-        Config::set('openai.api_key', 'test-key');
+        var_dump('OPENAI_API_KEY from config: ' . config('openai.api_key'));
         
         // Uruchom migracje
         $this->loadMigrationsFrom(__DIR__.'/database/migrations');
@@ -48,6 +58,9 @@ class TestCase extends BaseTestCase
         $app['config']->set('openai-assistant.table.files', 'ai_files');
         $app['config']->set('openai-assistant.table.threads', 'ai_threads');
         $app['config']->set('openai-assistant.table.messages', 'ai_messages');
+        
+        // Konfiguracja OpenAI
+        $app['config']->set('openai.api_key', env('OPENAI_API_KEY'));
     }
     
     /**

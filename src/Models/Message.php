@@ -139,36 +139,8 @@ class Message extends Model
                 $message->load('thread');
             }
             
-            // Upewnij się, że relacja thread.assistant jest załadowana
-            if (!$message->thread->relationLoaded('assistant')) {
-                $message->thread->load('assistant');
-            }
-            
-            // Sprawdź, czy asystent jest poprawnie skonfigurowany
-            if (!$message->thread->assistant || !$message->thread->assistant->openai_assistant_id) {
-                throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
-            }
-            
-            $client = \OpenAI::client(config('openai.api_key'));
-            
-            // Uruchom asystenta
-            $response = $client
-                ->threads()
-                ->runs()
-                ->create(
-                    threadId: $message->thread->openai_thread_id,
-                    parameters: [
-                        'assistant_id' => $message->thread->assistant->openai_assistant_id,
-                    ]
-                );
-            
-            // Zapisz identyfikator uruchomienia
-            $message->openai_run_id = $response->id;
-            $message->run_status = self::STATUS_PROCESSING;
-            $message->saveQuietly();
-            
-            // Uruchom zadanie w tle do monitorowania statusu
-            AssistantRequestJob::dispatch($message->id);
+            // Uruchom asystenta używając metody z modelu Thread
+            $message->thread->run($message);
         } catch (\Exception $e) {
             Log::error('Błąd podczas uruchamiania asystenta: ' . $e->getMessage(), [
                 'exception' => $e,

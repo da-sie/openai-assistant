@@ -14,6 +14,11 @@ class Assistant extends Model
         'instructions',
         'engine',
         'vector_store_id',
+        'tools',
+    ];
+
+    protected $casts = [
+        'tools' => 'array',
     ];
 
     public function __construct(array $attributes = [])
@@ -34,6 +39,7 @@ class Assistant extends Model
                         'name' => $assistant->name,
                         'instructions' => $assistant->instructions,
                         'model' => $assistant->engine,
+                        'tools' => $assistant->tools ?? [['type' => 'file_search']],
                     ]);
                     // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
                 } else {
@@ -69,7 +75,7 @@ class Assistant extends Model
                     'name' => $assistant->name,
                     'tools' => [
                         [
-                            'type' => 'retrieval',
+                            'type' => 'file_search',
                         ],
                     ],
                     'model' => $assistant->engine,
@@ -79,8 +85,9 @@ class Assistant extends Model
                 $assistant->saveQuietly();
                 // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
             } catch (\Exception $e) {
-                $assistant->delete();
-                Log::error($e->getMessage());
+                Log::error('Błąd podczas tworzenia asystenta w OpenAI: ' . $e->getMessage());
+                Log::error($e->getTraceAsString());
+                throw $e;
             }
         });
     }
@@ -123,7 +130,7 @@ class Assistant extends Model
             $client->assistants()->modify($this->openai_assistant_id, [
                 'tools' => [
                     [
-                        'type' => 'retrieval',
+                        'type' => 'file_search',
                     ],
                 ],
                 'file_ids' => [],
@@ -372,7 +379,7 @@ class Assistant extends Model
             $client->assistants()->modify($this->openai_assistant_id, [
                 'tools' => [
                     [
-                        'type' => 'retrieval',
+                        'type' => 'file_search',
                         'retrieval_tool_config' => [
                             'vector_store_ids' => [$vectorStore->id]
                         ]
@@ -460,7 +467,7 @@ class Assistant extends Model
     }
 
     /**
-     * Powiązuje istniejący vector store z asystentem.
+     * Powiązuje vector store z asystentem.
      *
      * @param string $vectorStoreId ID vector store do powiązania
      * @return bool
@@ -478,22 +485,57 @@ class Assistant extends Model
 
             // Sprawdzamy, czy vector store istnieje
             try {
-                $client->vectorStores()->retrieve($vectorStoreId);
+                $vectorStore = $client->vectorStores()->retrieve($vectorStoreId);
+                ray('Vector store znaleziony:', [
+                    'id' => $vectorStore->id,
+                    'name' => $vectorStore->name,
+                    'status' => $vectorStore->status
+                ]);
             } catch (\Exception $e) {
                 Log::error("Vector store o ID {$vectorStoreId} nie istnieje: " . $e->getMessage());
                 return false;
             }
 
-            // Aktualizujemy asystenta, aby używał podanego vector store
-            $client->assistants()->modify($this->openai_assistant_id, [
-                'tools' => [
-                    [
-                        'type' => 'retrieval',
-                        'retrieval_tool_config' => [
-                            'vector_store_ids' => [$vectorStoreId]
-                        ]
-                    ],
+            // Pobieramy aktualną konfigurację asystenta
+            $currentAssistant = $client->assistants()->retrieve($this->openai_assistant_id);
+            $currentTools = $currentAssistant->tools ?? [];
+
+            // Sprawdzamy, czy narzędzie file_search już istnieje
+            $hasFileSearch = false;
+            foreach ($currentTools as $key => $tool) {
+                if ($tool->type === 'file_search') {
+                    $hasFileSearch = true;
+                    break;
+                }
+            }
+
+            // Jeśli nie ma file_search, dodajemy je
+            if (!$hasFileSearch) {
+                $currentTools[] = ['type' => 'file_search'];
+            }
+
+            // Aktualizujemy asystenta
+            $updateParams = [
+                'tools' => $currentTools,
+                'tool_resources' => [
+                    'file_search' => [
+                        'vector_store_ids' => [$vectorStoreId]
+                    ]
                 ],
+                'metadata' => [
+                    'vector_store_id' => $vectorStoreId
+                ]
+            ];
+            
+            ray('Parametry aktualizacji asystenta:', $updateParams);
+            
+            $updatedAssistant = $client->assistants()->modify($this->openai_assistant_id, $updateParams);
+            
+            ray('Asystent zaktualizowany:', [
+                'id' => $updatedAssistant->id,
+                'tools' => $updatedAssistant->tools,
+                'tool_resources' => $updatedAssistant->tool_resources ?? null,
+                'metadata' => $updatedAssistant->metadata ?? null
             ]);
 
             // Zapisujemy vector_store_id w bazie danych
@@ -507,6 +549,10 @@ class Assistant extends Model
                 'assistant_id' => $this->id,
                 'openai_assistant_id' => $this->openai_assistant_id,
                 'vector_store_id' => $vectorStoreId,
+            ]);
+            ray('Błąd podczas powiązania vector store:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             
             return false;
@@ -547,7 +593,7 @@ class Assistant extends Model
             $client->assistants()->modify($this->openai_assistant_id, [
                 'tools' => [
                     [
-                        'type' => 'retrieval',
+                        'type' => 'file_search',
                         'retrieval_tool_config' => [
                             'vector_store_ids' => $validVectorStoreIds
                         ]
@@ -959,7 +1005,7 @@ class Assistant extends Model
 
             if (isset($assistantArray['tools']) && is_array($assistantArray['tools'])) {
                 foreach ($assistantArray['tools'] as $tool) {
-                    if (isset($tool['type']) && $tool['type'] === 'retrieval') {
+                    if (isset($tool['type']) && $tool['type'] === 'file_search') {
                         $hasRetrievalTool = true;
 
                         // Sprawdzamy, czy narzędzie ma skonfigurowane vector_store_ids

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e6903b9dcc323fdd27d1838347be3f9a",
+    "content-hash": "6a8fc6fb8b853f07e9199671a2b05332",
     "packages": [
         {
             "name": "brick/math",
@@ -6232,16 +6232,16 @@
         },
         {
             "name": "laravel/pint",
-            "version": "v1.21.0",
+            "version": "v1.21.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/pint.git",
-                "reference": "531fa0871fbde719c51b12afa3a443b8f4e4b425"
+                "reference": "c44bffbb2334e90fba560933c45948fa4a3f3e86"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/pint/zipball/531fa0871fbde719c51b12afa3a443b8f4e4b425",
-                "reference": "531fa0871fbde719c51b12afa3a443b8f4e4b425",
+                "url": "https://api.github.com/repos/laravel/pint/zipball/c44bffbb2334e90fba560933c45948fa4a3f3e86",
+                "reference": "c44bffbb2334e90fba560933c45948fa4a3f3e86",
                 "shasum": ""
             },
             "require": {
@@ -6252,9 +6252,9 @@
                 "php": "^8.2.0"
             },
             "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.68.5",
-                "illuminate/view": "^11.42.0",
-                "larastan/larastan": "^3.0.4",
+                "friendsofphp/php-cs-fixer": "^3.70.2",
+                "illuminate/view": "^11.44.1",
+                "larastan/larastan": "^3.1.0",
                 "laravel-zero/framework": "^11.36.1",
                 "mockery/mockery": "^1.6.12",
                 "nunomaduro/termwind": "^2.3",
@@ -6294,7 +6294,7 @@
                 "issues": "https://github.com/laravel/pint/issues",
                 "source": "https://github.com/laravel/pint"
             },
-            "time": "2025-02-18T03:18:57+00:00"
+            "time": "2025-03-11T03:22:21+00:00"
         },
         {
             "name": "laravel/tinker",
@@ -9347,16 +9347,16 @@
         },
         {
             "name": "spatie/laravel-ray",
-            "version": "1.39.1",
+            "version": "1.40.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/spatie/laravel-ray.git",
-                "reference": "0d890fa2cd2c0b6175cf54c56b9321d81047571d"
+                "reference": "3bcca8c64cd6d45c903f20cb0a548e2143ffdf84"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/spatie/laravel-ray/zipball/0d890fa2cd2c0b6175cf54c56b9321d81047571d",
-                "reference": "0d890fa2cd2c0b6175cf54c56b9321d81047571d",
+                "url": "https://api.github.com/repos/spatie/laravel-ray/zipball/3bcca8c64cd6d45c903f20cb0a548e2143ffdf84",
+                "reference": "3bcca8c64cd6d45c903f20cb0a548e2143ffdf84",
                 "shasum": ""
             },
             "require": {
@@ -9419,7 +9419,7 @@
             ],
             "support": {
                 "issues": "https://github.com/spatie/laravel-ray/issues",
-                "source": "https://github.com/spatie/laravel-ray/tree/1.39.1"
+                "source": "https://github.com/spatie/laravel-ray/tree/1.40.0"
             },
             "funding": [
                 {
@@ -9431,7 +9431,7 @@
                     "type": "other"
                 }
             ],
-            "time": "2025-02-05T08:16:15+00:00"
+            "time": "2025-03-08T10:58:11+00:00"
         },
         {
             "name": "spatie/macroable",

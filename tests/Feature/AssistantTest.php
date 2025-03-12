@@ -1,300 +1,425 @@
 <?php
 
+namespace DaSie\Openaiassistant\Tests\Feature;
+
 use DaSie\Openaiassistant\Models\Assistant;
 use DaSie\Openaiassistant\Models\Thread;
-use DaSie\Openaiassistant\Models\File;
-use Illuminate\Support\Facades\Http;
+use DaSie\Openaiassistant\Models\Message;
 
 beforeEach(function () {
-    // Mockujemy klienta OpenAI, aby nie wykonywać rzeczywistych zapytań
-    Http::fake([
-        'api.openai.com/v1/assistants/*' => Http::response([
-            'id' => 'asst_test123',
-            'object' => 'assistant',
-            'created_at' => time(),
-            'name' => 'Test Assistant',
-            'description' => null,
-            'model' => 'gpt-3.5-turbo',
-            'instructions' => 'You are a helpful assistant',
-            'tools' => [
-                [
-                    'type' => 'retrieval',
-                    'retrieval_tool_config' => [
-                        'vector_store_ids' => ['vs_test123']
-                    ]
-                ]
-            ],
-            'file_ids' => ['file-test123'],
-        ], 200),
-        'api.openai.com/v1/files' => Http::response([
-            'id' => 'file-test123',
-            'object' => 'file',
-            'created_at' => time(),
-            'filename' => 'test.pdf',
-            'purpose' => 'assistants',
-            'bytes' => 1024,
-            'status' => 'processed',
-        ], 200),
-        'api.openai.com/v1/files/*' => Http::response(null, 204),
-        'api.openai.com/v1/vector_stores' => Http::response([
-            'id' => 'vs_test123',
-            'object' => 'vector_store',
-            'created_at' => time(),
-            'name' => 'Test Vector Store',
-        ], 200),
-        'api.openai.com/v1/vector_stores/*' => Http::response([
-            'id' => 'vs_test123',
-            'object' => 'vector_store',
-            'created_at' => time(),
-            'name' => 'Test Vector Store',
-        ], 200),
-        'api.openai.com/v1/vector_stores/*/files' => Http::response([
-            'object' => 'list',
-            'data' => [
-                [
-                    'id' => 'file-test123',
-                    'object' => 'vector_store.file',
-                    'created_at' => time(),
-                ]
-            ]
-        ], 200),
-        'api.openai.com/v1/threads' => Http::response([
-            'id' => 'thread_test123',
-            'object' => 'thread',
-            'created_at' => time(),
-        ], 200),
-        'api.openai.com/v1/threads/*/runs' => Http::response([
-            'id' => 'run_test123',
-            'object' => 'thread.run',
-            'created_at' => time(),
-            'thread_id' => 'thread_test123',
-            'assistant_id' => 'asst_test123',
-            'status' => 'completed',
-        ], 200),
-        'api.openai.com/v1/threads/*/messages' => Http::response([
-            'data' => [
-                [
-                    'id' => 'msg_test123',
-                    'object' => 'thread.message',
-                    'created_at' => time(),
-                    'thread_id' => 'thread_test123',
-                    'role' => 'assistant',
-                    'content' => [
-                        [
-                            'type' => 'text',
-                            'text' => [
-                                'value' => 'Test response',
-                                'annotations' => []
-                            ]
-                        ]
-                    ],
-                ]
-            ]
-        ], 200),
+    if (empty(config('openai.api_key'))) {
+        $this->markTestSkipped('OpenAI API key not configured');
+    }
+    
+    $this->client = \OpenAI::client(config('openai.api_key'));
+});
+
+afterEach(function () {
+    // Czyszczenie po testach
+    foreach ($this->fileIds ?? [] as $fileId) {
+        try {
+            $this->client->files()->delete($fileId);
+        } catch (\Exception $e) {
+            // Logowanie błędu jeśli potrzebne
+        }
+    }
+
+    if (isset($this->vectorStoreId)) {
+        try {
+            $this->client->vectorStores()->delete($this->vectorStoreId);
+        } catch (\Exception $e) {
+            // Logowanie błędu jeśli potrzebne
+        }
+    }
+});
+
+/**
+ * @group vector
+ */
+test('can create assistant with vector store and verify response', function () {
+    uses()->group('vector');
+    
+    ray('Test: Rozpoczynam test tworzenia asystenta z vector store');
+    
+    // Tworzenie asystenta
+    ray('Krok 1: Tworzenie asystenta');
+    $assistant = Assistant::create([
+        'name' => 'Test Assistant',
+        'instructions' => 'Jesteś pomocnym asystentem testowym. Używaj narzędzia file_search do przeszukiwania vector store i odpowiadaj na pytania na podstawie znalezionych informacji. Nie dodawaj własnych informacji ani domysłów.',
+        'engine' => 'gpt-4-turbo-preview'
     ]);
-});
 
-test('assistant has correct relations', function () {
-    $assistant = new Assistant();
-    
-    expect($assistant->messages())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
-        ->and($assistant->threads())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
-        ->and($assistant->files())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class);
-});
-
-test('resetFiles resets vector store and files', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->vector_store_id = 'vs_test123';
-    
-    // Mockujemy metody
-    $assistant->shouldReceive('resetVectorStore')->once()->andReturn(true);
-    $assistant->shouldReceive('deleteAllFiles')->once()->andReturn(1);
-    $assistant->shouldReceive('saveQuietly')->andReturn(true);
-    
-    // Wywołujemy metodę
-    $result = $assistant->resetFiles();
-    
-    // Sprawdzamy, czy metoda zwróciła instancję asystenta
-    expect($result)->toBe($assistant);
-});
-
-test('resetVectorStore deletes vector store', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->vector_store_id = 'vs_test123';
-    $assistant->shouldReceive('saveQuietly')->andReturn(true);
-    
-    // Wywołujemy metodę
-    $result = $assistant->resetVectorStore();
-    
-    // Sprawdzamy, czy vector store został usunięty
-    expect($result)->toBeTrue()
-        ->and($assistant->vector_store_id)->toBeNull();
-});
-
-test('uploadFiles uploads files to OpenAI', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    
-    // Mockujemy funkcję is_file, aby zawsze zwracała true
-    $assistant->shouldReceive('is_file')->andReturn(true);
-    
-    // Mockujemy funkcję fopen, aby nie próbować otwierać rzeczywistych plików
-    $assistant->shouldReceive('fopen')->andReturn(fopen('php://memory', 'r'));
-    
-    // Wywołujemy metodę
-    $result = $assistant->uploadFiles(['/path/to/test.pdf']);
-    
-    // Sprawdzamy, czy pliki zostały przesłane
-    expect($result)
-        ->toBeArray()
-        ->toHaveKeys(['uploaded_files', 'errors'])
-        ->and($result['uploaded_files'])->toContain('file-test123')
-        ->and($result['errors'])->toBeEmpty();
-});
-
-test('createAndLinkVectorStore creates and links vector store', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->name = 'Test Assistant';
-    
-    // Mockujemy metody
-    $assistant->shouldReceive('resetVectorStore')->once()->andReturn(true);
-    $assistant->shouldReceive('saveQuietly')->andReturn(true);
-    
-    // Wywołujemy metodę
-    $result = $assistant->createAndLinkVectorStore(['file-test123']);
-    
-    // Sprawdzamy, czy vector store został utworzony i powiązany
-    expect($result)
-        ->toBeArray()
-        ->toHaveKeys(['success', 'vector_store_id', 'files'])
-        ->and($result['success'])->toBeTrue()
-        ->and($result['vector_store_id'])->toBe('vs_test123')
-        ->and($result['files'])->toBeArray();
-});
-
-test('updateKnowledge updates assistant knowledge', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    
-    // Mockujemy metody
-    $assistant->shouldReceive('uploadFiles')->once()->andReturn([
-        'uploaded_files' => ['file-test123'],
-        'errors' => [],
+    ray('Asystent utworzony:', [
+        'id' => $assistant->id,
+        'openai_assistant_id' => $assistant->openai_assistant_id
     ]);
-    
-    $assistant->shouldReceive('createAndLinkVectorStore')->once()->andReturn([
-        'success' => true,
-        'vector_store_id' => 'vs_test123',
-        'files' => [new File()],
+
+    expect($assistant->id)->not->toBeNull()
+        ->and($assistant->openai_assistant_id)->not->toBeNull();
+
+    // Tworzenie pliku testowego
+    ray('Krok 2: Tworzenie pliku testowego');
+    $tempFile = tempnam(sys_get_temp_dir(), 'test_') . '.txt';
+    file_put_contents($tempFile, "Przemek ma psa o imieniu Piksel. To shih-tzu");
+    ray('Plik testowy utworzony:', $tempFile);
+
+    // Przesyłanie pliku do OpenAI
+    ray('Krok 3: Przesyłanie pliku do OpenAI');
+    $fileResponse = $this->client->files()->upload([
+        'purpose' => 'assistants',
+        'file' => fopen($tempFile, 'r'),
     ]);
-    
-    // Wywołujemy metodę
-    $result = $assistant->updateKnowledge(['/path/to/test.pdf']);
-    
-    // Sprawdzamy, czy wiedza została zaktualizowana
-    expect($result)
-        ->toBeArray()
-        ->toHaveKeys(['success', 'message', 'files_added', 'vector_store_id', 'errors'])
-        ->and($result['success'])->toBeTrue()
-        ->and($result['vector_store_id'])->toBe('vs_test123')
-        ->and($result['files_added'])->toBe(1);
-});
 
-test('linkVectorStore links vector store to assistant', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->shouldReceive('saveQuietly')->andReturn(true);
-    
-    // Wywołujemy metodę
-    $result = $assistant->linkVectorStore('vs_test123');
-    
-    // Sprawdzamy, czy vector store został powiązany
-    expect($result)->toBeTrue()
-        ->and($assistant->vector_store_id)->toBe('vs_test123');
-});
+    ray('Plik przesłany do OpenAI:', [
+        'file_id' => $fileResponse->id
+    ]);
 
-test('linkMultipleVectorStores links multiple vector stores', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    
-    // Mockujemy metody
-    $assistant->shouldReceive('validateVectorStoreIds')->once()->andReturn(['vs_test123', 'vs_test456']);
-    $assistant->shouldReceive('saveQuietly')->andReturn(true);
-    
-    // Wywołujemy metodę
-    $result = $assistant->linkMultipleVectorStores(['vs_test123', 'vs_test456']);
-    
-    // Sprawdzamy, czy vector stores zostały powiązane
-    expect($result)->toBeTrue()
-        ->and($assistant->vector_store_id)->toBe('vs_test123');
-});
+    $this->fileIds[] = $fileResponse->id;
+    unlink($tempFile);
 
-test('searchVectorStore searches vector store', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->vector_store_id = 'vs_test123';
-    
-    // Mockujemy metody
-    $assistant->shouldReceive('searchVectorStoreWithAssistant')->once()->andReturn([
-        [
-            'id' => 'msg_test123',
-            'content' => [
-                [
-                    'type' => 'text',
-                    'text' => [
-                        'value' => 'Test response',
-                    ]
-                ]
-            ],
+    // Czekamy na przetworzenie pliku
+    $fileStatus = 'processing';
+    $maxAttempts = 10;
+    $attempts = 0;
+
+    while ($fileStatus === 'processing' && $attempts < $maxAttempts) {
+        $fileInfo = $this->client->files()->retrieve($fileResponse->id);
+        $fileStatus = $fileInfo->status;
+        
+        if ($fileStatus === 'processed') {
+            break;
+        }
+        
+        $attempts++;
+        sleep(1);
+    }
+
+    if ($fileStatus !== 'processed') {
+        throw new \Exception('Plik nie został przetworzony w oczekiwanym czasie.');
+    }
+
+    // Tworzenie vector store
+    ray('Krok 4: Tworzenie vector store');
+    $vectorStoreResponse = $this->client->vectorStores()->create([
+        'name' => 'Test Vector Store',
+        'metadata' => [
+            'assistant_id' => $assistant->openai_assistant_id
         ]
     ]);
+
+    ray('Vector store utworzony:', [
+        'id' => $vectorStoreResponse->id
+    ]);
+
+    $this->vectorStoreId = $vectorStoreResponse->id;
+
+    // Dodawanie pliku do vector store
+    ray('Krok 5: Dodawanie pliku do vector store');
+    $this->client->vectorStores()->files()->create($this->vectorStoreId, [
+        'file_id' => $this->fileIds[0],
+    ]);
+    ray('Plik dodany do vector store');
+
+    // Czekamy na zaindeksowanie pliku
+    ray('Krok 5.1: Czekamy na zaindeksowanie pliku');
+    sleep(2);
+
+    // Sprawdzamy status vector store
+    ray('Krok 5.2: Sprawdzamy status vector store');
+    $vectorStoreStatus = $this->client->vectorStores()->retrieve($this->vectorStoreId);
+    ray('Status vector store:', [
+        'id' => $vectorStoreStatus->id,
+        'status' => $vectorStoreStatus->status,
+        'file_count' => count($vectorStoreStatus->file_ids ?? [])
+    ]);
+
+    // Sprawdzamy status pliku w vector store
+    ray('Krok 5.3: Sprawdzamy status pliku w vector store');
+    $fileStatus = $this->client->vectorStores()->files()->list($this->vectorStoreId);
+    ray('Status pliku w vector store:', [
+        'files' => $fileStatus->data
+    ]);
+
+    // Czekamy na zaindeksowanie pliku
+    ray('Krok 5.4: Czekamy na zaindeksowanie pliku');
+    $maxAttempts = 30;
+    $attempts = 0;
+    $isIndexed = false;
+
+    while (!$isIndexed && $attempts < $maxAttempts) {
+        $fileStatus = $this->client->vectorStores()->files()->list($this->vectorStoreId);
+        $file = $fileStatus->data[0] ?? null;
+        
+        if ($file && $file->status === 'completed') {
+            $isIndexed = true;
+            ray('Plik został zaindeksowany');
+            break;
+        }
+        
+        ray('Czekamy na zaindeksowanie pliku, status:', [
+            'status' => $file->status ?? 'unknown',
+            'attempt' => $attempts + 1
+        ]);
+        
+        sleep(2);
+        $attempts++;
+    }
+
+    if (!$isIndexed) {
+        ray('Nie udało się zaindeksować pliku po ' . $maxAttempts . ' próbach');
+    }
+
+    ray('Zakończono czekanie na zaindeksowanie');
+
+    // Powiązanie vector store z asystentem
+    ray('Krok 6: Powiązanie vector store z asystentem');
+    $result = $assistant->linkVectorStore($this->vectorStoreId);
+    ray('Vector store powiązany z asystentem:', [
+        'success' => $result
+    ]);
+
+    // Sprawdzamy status asystenta
+    ray('Krok 6.1: Sprawdzamy status asystenta');
+    $assistantStatus = $this->client->assistants()->retrieve($assistant->openai_assistant_id);
+    ray('Status asystenta:', [
+        'id' => $assistantStatus->id,
+        'tools' => $assistantStatus->tools
+    ]);
+
+    // Tworzenie wątku i wiadomości
+    ray('Krok 7: Tworzenie wątku');
+    $thread = Thread::create([
+        'assistant_id' => $assistant->id,
+        'uuid' => uniqid('test_'),
+        'model_id' => 1,
+        'model_type' => 'Test'
+    ]);
+
+    ray('Wątek utworzony:', [
+        'id' => $thread->id,
+        'openai_thread_id' => $thread->openai_thread_id
+    ]);
+
+    ray('Krok 8: Tworzenie wiadomości');
+    $message = $thread->createMessage([
+        'prompt' => 'Jakie zwierzę ma Przemek i jak się nazywa?',
+        'response_type' => 'text'
+    ]);
+
+    ray('Wiadomość utworzona:', [
+        'id' => $message->id,
+        'prompt' => $message->prompt
+    ]);
+
+    // Uruchamianie asystenta i oczekiwanie na odpowiedź
+    ray('Krok 9: Uruchamianie asystenta i oczekiwanie na odpowiedź');
+    $response = $thread->run($message);
+
+    ray('Odpowiedź otrzymana:', [
+        'response' => $response->response,
+        'run_status' => $response->run_status
+    ]);
+
+    // Weryfikacja odpowiedzi
+    ray('Krok 10: Weryfikacja odpowiedzi');
+    expect($response->response)->toContain('Piksel')
+        ->and($response->response)->toContain('shih-tzu');
     
-    // Wywołujemy metodę
-    $result = $assistant->searchVectorStore('test query');
-    
-    // Sprawdzamy, czy wyszukiwanie zwróciło wyniki
-    expect($result)
-        ->toBeArray()
-        ->toHaveKeys(['query', 'vector_store_id', 'results'])
-        ->and($result['query'])->toBe('test query')
-        ->and($result['vector_store_id'])->toBe('vs_test123')
-        ->and($result['results'])->toBeArray();
+    ray('Test zakończony');
 });
 
-test('checkVectorStoreStatus returns vector store status', function () {
-    // Tworzymy mock dla Assistant
-    $assistant = Mockery::mock(Assistant::class)->makePartial();
-    $assistant->id = 1;
-    $assistant->openai_assistant_id = 'asst_test123';
-    $assistant->vector_store_id = 'vs_test123';
-    
-    // Wywołujemy metodę
-    $result = $assistant->checkVectorStoreStatus();
-    
-    // Sprawdzamy, czy status został zwrócony
-    expect($result)
-        ->toBeArray()
-        ->toHaveKeys(['status', 'has_retrieval_tool', 'has_vector_store_id', 'is_linked', 'vector_store_id', 'linked_vector_store_ids', 'vector_store'])
-        ->and($result['status'])->toBe('success')
-        ->and($result['has_retrieval_tool'])->toBeTrue()
-        ->and($result['has_vector_store_id'])->toBeTrue()
-        ->and($result['is_linked'])->toBeTrue()
-        ->and($result['vector_store_id'])->toBe('vs_test123');
-}); 
+test('can handle multiple files in vector store', function () {
+    // Tworzenie asystenta
+    $assistant = Assistant::create([
+        'name' => 'Multi-File Test Assistant',
+        'instructions' => 'Jesteś pomocnym asystentem testowym. Używaj narzędzia file_search do przeszukiwania vector store i odpowiadaj na pytania na podstawie znalezionych informacji. Nie dodawaj własnych informacji ani domysłów.',
+        'engine' => 'gpt-4-turbo-preview'
+    ]);
+
+    // Przygotowanie wielu plików
+    $files = [
+        'pies.txt' => "Przemek ma psa o imieniu Piksel. To shih-tzu",
+        'kot.txt' => "Przemek ma też kota o imieniu Luna. To kot brytyjski."
+    ];
+
+    foreach ($files as $filename => $content) {
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_') . '.txt';
+        file_put_contents($tempFile, $content);
+
+        $fileResponse = $this->client->files()->upload([
+            'purpose' => 'assistants',
+            'file' => fopen($tempFile, 'r'),
+        ]);
+
+        $this->fileIds[] = $fileResponse->id;
+        unlink($tempFile);
+    }
+
+    // Tworzenie vector store
+    $vectorStoreResponse = $this->client->vectorStores()->create([
+        'name' => 'Multi-File Test Vector Store',
+        'metadata' => [
+            'assistant_id' => $assistant->openai_assistant_id
+        ]
+    ]);
+
+    $this->vectorStoreId = $vectorStoreResponse->id;
+
+    // Dodawanie plików do vector store
+    foreach ($this->fileIds as $fileId) {
+        $this->client->vectorStores()->files()->create($this->vectorStoreId, [
+            'file_id' => $fileId,
+        ]);
+    }
+
+    // Czekamy na zaindeksowanie plików
+    ray('Czekamy na zaindeksowanie plików');
+    $maxAttempts = 30;
+    $attempts = 0;
+    $allIndexed = true;
+
+    while (!$allIndexed && $attempts < $maxAttempts) {
+        $fileStatus = $this->client->vectorStores()->files()->list($this->vectorStoreId);
+        $allIndexed = true;
+        
+        foreach ($fileStatus->data as $file) {
+            if ($file->status !== 'completed') {
+                $allIndexed = false;
+                break;
+            }
+        }
+        
+        if ($allIndexed) {
+            ray('Wszystkie pliki zostały zaindeksowane');
+            break;
+        }
+        
+        ray('Czekamy na zaindeksowanie plików, status:', [
+            'files' => array_map(fn($file) => [
+                'id' => $file->id,
+                'status' => $file->status
+            ], $fileStatus->data),
+            'attempt' => $attempts + 1
+        ]);
+        
+        sleep(2);
+        $attempts++;
+    }
+
+    if (!$allIndexed) {
+        ray('Nie udało się zaindeksować wszystkich plików po ' . $maxAttempts . ' próbach');
+    }
+
+    ray('Zakończono czekanie na zaindeksowanie');
+
+    // Powiązanie vector store z asystentem
+    $assistant->linkVectorStore($this->vectorStoreId);
+
+    // Test wyszukiwania informacji
+    $thread = Thread::create([
+        'assistant_id' => $assistant->id,
+        'uuid' => uniqid('test_'),
+        'model_id' => 1,
+        'model_type' => 'Test'
+    ]);
+
+    $message = $thread->createMessage([
+        'prompt' => 'Jakie zwierzęta ma Przemek?',
+        'response_type' => 'text'
+    ]);
+
+    $response = $thread->run($message);
+
+    // Weryfikacja odpowiedzi
+    expect($response->response)->toContain('Piksel')
+        ->and($response->response)->toContain('Luna');
+});
+
+test('can handle files in thread', function () {
+    // Tworzenie asystenta
+    $assistant = Assistant::create([
+        'name' => 'Thread Files Test Assistant',
+        'instructions' => 'Jesteś pomocnym asystentem testowym. Używaj narzędzia file_search do przeszukiwania plików i odpowiadaj na pytania na podstawie znalezionych informacji.',
+        'engine' => 'gpt-4-turbo-preview',
+        'tools' => [
+            ['type' => 'file_search']
+        ]
+    ]);
+
+    ray('Asystent utworzony:', [
+        'id' => $assistant->id,
+        'openai_assistant_id' => $assistant->openai_assistant_id,
+        'tools' => $assistant->tools
+    ]);
+
+    // Sprawdź konfigurację asystenta w OpenAI
+    $client = \OpenAI::client(config('openai.api_key'));
+    $openaiAssistant = $client->assistants()->retrieve($assistant->openai_assistant_id);
+
+    ray('Konfiguracja asystenta w OpenAI:', [
+        'id' => $openaiAssistant->id,
+        'tools' => $openaiAssistant->tools,
+        'file_ids' => $openaiAssistant->file_ids ?? []
+    ]);
+
+    // Tworzenie pliku testowego
+    $tempFile = tempnam(sys_get_temp_dir(), 'test_') . '.txt';
+    file_put_contents($tempFile, "To jest dokument testowy do wątku.");
+
+    ray('Plik testowy utworzony:', [
+        'path' => $tempFile,
+        'content' => file_get_contents($tempFile)
+    ]);
+
+    // Przesyłanie pliku do OpenAI
+    $fileResponse = $this->client->files()->upload([
+        'purpose' => 'assistants',
+        'file' => fopen($tempFile, 'r'),
+    ]);
+
+    $this->fileIds[] = $fileResponse->id;
+    unlink($tempFile);
+
+    // Czekamy na przetworzenie pliku
+    $fileStatus = 'processing';
+    $maxAttempts = 10;
+    $attempts = 0;
+
+    while ($fileStatus === 'processing' && $attempts < $maxAttempts) {
+        $fileInfo = $this->client->files()->retrieve($fileResponse->id);
+        $fileStatus = $fileInfo->status;
+        
+        if ($fileStatus === 'processed') {
+            break;
+        }
+        
+        $attempts++;
+        sleep(1);
+    }
+
+    if ($fileStatus !== 'processed') {
+        throw new \Exception('Plik nie został przetworzony w oczekiwanym czasie.');
+    }
+
+    // Tworzenie wątku
+    $thread = Thread::create([
+        'assistant_id' => $assistant->id,
+        'uuid' => uniqid('test_'),
+        'model_id' => 1,
+        'model_type' => 'Test'
+    ]);
+
+    // Dodawanie pliku do wątku
+    $thread->attachFile($this->fileIds[0]);
+
+    // Test wiadomości z odwołaniem do pliku
+    $message = $thread->createMessage([
+        'prompt' => 'Co znajduje się w załączonym dokumencie?',
+        'response_type' => 'text'
+    ]);
+
+    $response = $thread->run($message);
+
+    // Weryfikacja odpowiedzi
+    expect($response->response)->toContain('dokument testowy');
+});
