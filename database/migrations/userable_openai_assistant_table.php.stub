@@ -9,7 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table(config('openai-assistant.table.messages'), function (Blueprint $table) {
-            $table->morphs('userable');
+            $table->unsignedBigInteger('userable_id')->nullable();
+            $table->string('userable_type')->nullable();
         });
     }
 };

@@ -122,12 +122,6 @@ class Message extends Model
                 break;
         }
         
-        // Dodaj pliki, jeśli są dostępne
-        if ($this->thread->files->count() > 0) {
-            $messageParams['file_ids'] = $this->thread->files->pluck('openai_file_id')->toArray();
-            $messageParams['content'] .= ' Odpowiedź oprzyj wyłącznie na załączonych plikach.';
-        }
-        
         return $messageParams;
     }
 

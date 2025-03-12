@@ -29,6 +29,7 @@ class Thread extends Model
                 $response = $client->threads()->create([]);
 
                 $thread->openai_thread_id = $response->id;
+                $thread->status = 'created';
                 $thread->saveQuietly();
             } catch (\Exception $e) {
                 Log::error('Błąd podczas tworzenia wątku: ' . $e->getMessage(), [
@@ -45,40 +46,26 @@ class Thread extends Model
     /**
      * Tworzy nową wiadomość w wątku i wysyła ją do OpenAI
      * 
-     * @param string $content Treść wiadomości
-     * @param array $fileIds Opcjonalne identyfikatory plików do załączenia
+     * @param array $attributes Atrybuty wiadomości (prompt, response_type)
+     * @param mixed|null $userable Opcjonalny model użytkownika
      * @return Message Utworzona wiadomość
      */
-    public function createMessage(string $content, array $fileIds = []): Message
+    public function createMessage(array $attributes, $userable = null): Message
     {
         try {
-            $client = \OpenAI::client(config('openai.api_key'));
-
-            // Parametry wiadomości
-            $parameters = [
-                'role' => 'user',
-                'content' => $content,
-            ];
-
-            // Dodaj pliki, jeśli są
-            if (!empty($fileIds)) {
-                $parameters['file_ids'] = $fileIds;
-            }
-
-            // Wyślij wiadomość do OpenAI
-            $response = $client->threads()->messages()->create(
-                threadId: $this->openai_thread_id,
-                parameters: $parameters
-            );
-
             // Utwórz lokalny rekord wiadomości
             $message = new Message([
                 'thread_id' => $this->id,
-                'role' => 'user',
-                'content' => $content,
-                'openai_message_id' => $response->id,
-                'file_ids' => $fileIds,
+                'prompt' => $attributes['prompt'],
+                'response_type' => $attributes['response_type'],
+                'assistant_id' => $this->assistant_id,
             ]);
+        
+
+            // Jeśli przekazano userable, dodaj relację
+            if ($userable) {
+                $message->userable()->associate($userable);
+            }
 
             $message->save();
 
