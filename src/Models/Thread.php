@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Log;
+use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
+use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 
 /**
  * @method runWithStreaming(Message $message, callable $streamCallback): void
@@ -322,115 +324,168 @@ class Thread extends Model
     public function runWithStreaming(Message $message, callable $streamCallback): void
     {
         try {
+            ray('Rozpoczynam streamowanie odpowiedzi:', [
+                'message_id' => $message->id,
+                'thread_id' => $this->id,
+                'assistant_id' => $this->assistant_id
+            ]);
+
             // Upewnij się, że relacja assistant jest załadowana
             if (!$this->relationLoaded('assistant')) {
                 $this->load('assistant');
             }
 
             if (!$this->assistant || !$this->assistant->openai_assistant_id) {
+                ray('Błąd: Asystent nie jest poprawnie skonfigurowany');
                 throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
             }
 
             $client = \OpenAI::client(config('openai.api_key'));
 
-            // Uruchom wątek ze streamingiem
-            $stream = $client->threads()->runs()->createStreamed(
+            ray('Wysyłam wiadomość do OpenAI:', [
+                'prompt' => $message->prompt,
+                'thread_id' => $this->openai_thread_id
+            ]);
+
+            // Dodaj wiadomość do wątku
+            $messageResponse = $client->threads()->messages()->create(
+                threadId: $this->openai_thread_id,
+                parameters: [
+                    'role' => 'user',
+                    'content' => $message->prompt
+                ]
+            );
+
+            ray('Wiadomość dodana do OpenAI:', [
+                'message_id' => $messageResponse->id,
+                'thread_id' => $this->openai_thread_id
+            ]);
+
+            $message->openai_message_id = $messageResponse->id;
+            $message->saveQuietly();
+
+            ray('Uruchamiam run w OpenAI:', [
+                'assistant_id' => $this->assistant->openai_assistant_id,
+                'thread_id' => $this->openai_thread_id
+            ]);
+
+            // Uruchom wątek
+            $run = $client->threads()->runs()->create(
                 threadId: $this->openai_thread_id,
                 parameters: [
                     'assistant_id' => $this->assistant->openai_assistant_id,
                 ]
             );
 
-            // Inicjalizacja zmiennej $run przed pętlą
-            $run = null;
-            $runCompleted = false;
+            ray('Run utworzony:', [
+                'run_id' => $run->id,
+                'status' => $run->status
+            ]);
 
-            do {
-                foreach ($stream as $response) {
-                    // Logowanie dla debugowania
-                    Log::debug('OpenAI event: ' . $response->event);
+            $message->openai_run_id = $run->id;
+            $message->run_status = $run->status;
+            $message->saveQuietly();
 
-                    switch ($response->event) {
-                        case 'thread.run.created':
-                        case 'thread.run.queued':
-                        case 'thread.run.in_progress':
-                        case 'thread.run.completed':
-                            $run = $response->response;
-                            if ($response->event === 'thread.run.completed') {
-                                $runCompleted = true;
-                            }
-                            break;
-                        case 'thread.run.cancelling':
-                            $run = $response->response;
-                            break;
-                        case 'thread.run.expired':
-                        case 'thread.run.cancelled':
-                        case 'thread.run.failed':
-                            $run = $response->response;
-                            $runCompleted = true; // Zakończ pętlę
-                            break;
-                        case 'thread.run.requires_action':
-                            $run = $response->response;
+            // Czekaj na zakończenie uruchomienia
+            $status = $run->status;
+            $runId = $run->id;
 
-                            // Obsługa wymaganych akcji narzędzi
-                            if (isset($run->requiredAction) && isset($run->requiredAction->submitToolOutputs)) {
-                                $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
-                                $toolOutputs = [];
-
-                                // Tutaj można dodać logikę obsługi różnych narzędzi
-                                foreach ($toolCalls as $toolCall) {
-                                    // Przykładowa implementacja - w rzeczywistości powinna być bardziej rozbudowana
-                                    // i obsługiwać różne typy narzędzi
-                                    $toolOutputs[] = [
-                                        'tool_call_id' => $toolCall->id,
-                                        'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
-                                    ];
-                                }
-
-                                // Nadpisz strumień nowym strumieniem po przesłaniu wyników narzędzi
-                                $stream = $client->threads()->runs()->submitToolOutputsStreamed(
-                                    threadId: $run->threadId,
-                                    runId: $run->id,
-                                    parameters: [
-                                        'tool_outputs' => $toolOutputs,
-                                    ]
-                                );
-                            }
-                            break;
-                        case 'thread.message.created':
-                        case 'thread.message.delta':
-                            // Obsługa wiadomości w trakcie streamingu
-                            if (
-                                $response->event === 'thread.message.delta' &&
-                                isset($response->response->delta) &&
-                                isset($response->response->delta->content)
-                            ) {
-
-                                foreach ($response->response->delta->content as $content) {
-                                    if ($content->type === 'text' && isset($content->text->value)) {
-                                        // Wywołaj callback z fragmentem odpowiedzi
-                                        $streamCallback($content->text->value, $message);
-                                    }
-                                }
-                            }
-                            break;
-                    }
-                }
-            } while ($run && !$runCompleted);
-
-            // Pobierz wiadomości po zakończeniu uruchomienia
-            if ($run && ($run->status === "completed" || $runCompleted)) {
+            while (in_array($status, ['queued', 'in_progress', 'requires_action'])) {
+                sleep(1);
                 try {
-                    // Pobierz wiadomości wygenerowane przez asystenta
+                    ray('Sprawdzam status runa:', [
+                        'run_id' => $runId,
+                        'current_status' => $status
+                    ]);
+
+                    $run = $client->threads()->runs()->retrieve(
+                        threadId: $this->openai_thread_id,
+                        runId: $runId
+                    );
+                    $status = $run->status;
+                    
+                    ray('Status runa zaktualizowany:', [
+                        'run_id' => $runId,
+                        'new_status' => $status
+                    ]);
+
+                    // Aktualizuj status i powiadom frontend
+                    $message->run_status = $status;
+                    $message->saveQuietly();
+                    
+                    if ($status === 'in_progress') {
+                        ray('Wysyłam event o przetwarzaniu');
+                        event(new AssistantUpdatedEvent($this->uuid, [
+                            'steps' => ['processed_ai' => CheckmarkStatus::processing],
+                            'completed' => false,
+                            'message_id' => $message->id
+                        ]));
+                    }
+
+                    // Obsługa wymaganych akcji narzędzi
+                    if ($status === 'requires_action' && isset($run->requiredAction)) {
+                        ray('Wymagane akcje narzędzi:', [
+                            'tool_calls' => $run->requiredAction->submitToolOutputs->toolCalls ?? []
+                        ]);
+
+                        $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
+                        $toolOutputs = [];
+
+                        foreach ($toolCalls as $toolCall) {
+                            $toolOutputs[] = [
+                                'tool_call_id' => $toolCall->id,
+                                'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
+                            ];
+                        }
+
+                        ray('Wysyłam wyniki narzędzi:', [
+                            'tool_outputs' => $toolOutputs
+                        ]);
+
+                        $run = $client->threads()->runs()->submitToolOutputs(
+                            threadId: $this->openai_thread_id,
+                            runId: $runId,
+                            parameters: [
+                                'tool_outputs' => $toolOutputs,
+                            ]
+                        );
+                        $status = $run->status;
+
+                        ray('Status po wysłaniu wyników narzędzi:', [
+                            'new_status' => $status
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    ray('Błąd podczas sprawdzania statusu:', [
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    Log::error('Błąd podczas sprawdzania statusu: ' . $e->getMessage());
+                    event(new AssistantUpdatedEvent($this->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                        'completed' => true,
+                        'message_id' => $message->id
+                    ]));
+                    throw $e;
+                }
+            }
+
+            if ($status === 'completed') {
+                try {
+                    ray('Run zakończony sukcesem, pobieram wiadomości');
+                    
                     $messages = $client->threads()->messages()->list(
                         threadId: $this->openai_thread_id,
                         parameters: [
                             'order' => 'asc',
-                            'after' => $message->openai_message_id // Pobierz tylko wiadomości po ostatniej wysłanej
+                            'after' => $message->openai_message_id
                         ]
                     );
 
-                    // Znajdź pierwszą wiadomość od asystenta
+                    ray('Pobrane wiadomości:', [
+                        'count' => count($messages->data)
+                    ]);
+
                     $assistantMessage = null;
                     foreach ($messages->data as $msg) {
                         if ($msg->role === 'assistant') {
@@ -440,70 +495,78 @@ class Thread extends Model
                     }
 
                     if ($assistantMessage) {
-                        // Zapisz odpowiedź w bazie danych
+                        ray('Znaleziono wiadomość asystenta:', [
+                            'message_id' => $assistantMessage->id,
+                            'content_count' => count($assistantMessage->content)
+                        ]);
+
                         $content = '';
                         foreach ($assistantMessage->content as $contentPart) {
                             if ($contentPart->type === 'text') {
                                 $content .= $contentPart->text->value;
-
-                                // Wywołaj callback z fragmentem odpowiedzi, jeśli nie było to już obsłużone w streamingu
+                                ray('Wysyłam fragment odpowiedzi:', [
+                                    'content' => $contentPart->text->value
+                                ]);
                                 $streamCallback($contentPart->text->value, $message);
-                            } elseif ($contentPart->type === 'image') {
-                                // Obsługa obrazów, jeśli są wspierane
-                                $content .= "[OBRAZ]";
-                                // Możesz dodać dodatkową logikę obsługi obrazów
                             }
                         }
 
-                        // Zapisz odpowiedź i zaktualizuj status
                         $message->response = $content;
                         $message->run_status = 'completed';
                         $message->saveQuietly();
 
-                        // Oznacz zakończenie streamingu
+                        ray('Wysyłam event o sukcesie');
+                        event(new AssistantUpdatedEvent($this->uuid, [
+                            'steps' => ['processed_ai' => CheckmarkStatus::success],
+                            'completed' => true,
+                            'message_id' => $message->id
+                        ]));
+
                         $streamCallback(null, $message, true);
                     } else {
-                        // Brak wiadomości od asystenta
-                        Log::warning('Nie znaleziono wiadomości od asystenta po zakończeniu run');
-                        $message->run_status = 'completed_no_response';
-                        $message->saveQuietly();
-                        $streamCallback(null, $message, true, new \Exception("Brak odpowiedzi od asystenta"));
+                        ray('Nie znaleziono wiadomości asystenta');
+                        throw new \Exception('Brak odpowiedzi od asystenta');
                     }
                 } catch (\Exception $e) {
-                    // Obsługa błędu podczas pobierania wiadomości
-                    Log::error('Błąd podczas pobierania wiadomości: ' . $e->getMessage());
-                    $message->run_status = 'completed_with_error';
-                    $message->saveQuietly();
-                    $streamCallback(null, $message, true, $e);
+                    ray('Błąd podczas pobierania odpowiedzi:', [
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    Log::error('Błąd podczas pobierania odpowiedzi: ' . $e->getMessage());
+                    event(new AssistantUpdatedEvent($this->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                        'completed' => true,
+                        'message_id' => $message->id
+                    ]));
+                    throw $e;
                 }
-            } else if ($run) {
-                // Obsługa innych statusów zakończenia
-                $status = $run->status ?? 'unknown';
-                Log::warning("Run zakończony ze statusem: {$status}");
-                $message->run_status = $status;
-                $message->saveQuietly();
-                $streamCallback(null, $message, true, new \Exception("Run zakończony ze statusem: {$status}"));
             } else {
-                // Brak obiektu run
-                Log::error('Brak obiektu run po zakończeniu streamingu');
-                $message->run_status = 'failed_no_run';
-                $message->saveQuietly();
-                $streamCallback(null, $message, true, new \Exception("Nie udało się utworzyć run"));
+                ray('Run zakończony niepowodzeniem:', [
+                    'status' => $status
+                ]);
+                Log::error('Run zakończony ze statusem: ' . $status);
+                event(new AssistantUpdatedEvent($this->uuid, [
+                    'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                    'completed' => true,
+                    'message_id' => $message->id
+                ]));
+                throw new \Exception('Run zakończony ze statusem: ' . $status);
             }
         } catch (\Exception $e) {
-            // Loguj błąd
-            Log::error('Błąd podczas streamowania odpowiedzi: ' . $e->getMessage(), [
-                'exception' => $e,
-                'thread_id' => $this->id,
-                'openai_thread_id' => $this->openai_thread_id,
-                'message_id' => $message->id ?? null,
+            ray('Błąd podczas streamowania:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
-
-            // Aktualizuj status wiadomości
+            Log::error('Błąd podczas streamowania: ' . $e->getMessage());
             $message->run_status = 'failed';
             $message->saveQuietly();
-
-            // Wywołaj callback z informacją o błędzie
+            
+            event(new AssistantUpdatedEvent($this->uuid, [
+                'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                'completed' => true,
+                'message_id' => $message->id
+            ]));
+            
             $streamCallback(null, $message, true, $e);
         }
     }

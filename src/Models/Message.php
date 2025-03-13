@@ -140,7 +140,45 @@ class Message extends Model
             }
             
             // Uruchom asystenta używając metody z modelu Thread
-            $message->thread->run($message);
+            ray('Uruchamiam stream');
+            $message->thread->runWithStreaming($message, function($content, $message, $isComplete = false, $error = null) {
+                if ($error) {
+                    ray('Błąd podczas streamowania:', [
+                        'error' => $error->getMessage(),
+                        'message_id' => $message->id
+                    ]);
+                    event(new AssistantUpdatedEvent($message->thread->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                        'completed' => true,
+                        'message_id' => $message->id,
+                        'error' => $error->getMessage()
+                    ]));
+                    return;
+                }
+
+                if ($isComplete) {
+                    ray('Streaming zakończony');
+                    event(new AssistantUpdatedEvent($message->thread->uuid, [
+                        'steps' => ['processed_ai' => CheckmarkStatus::success],
+                        'completed' => true,
+                        'message_id' => $message->id
+                    ]));
+                    return;
+                }
+
+                ray('Otrzymano fragment odpowiedzi:', [
+                    'content' => $content,
+                    'message_id' => $message->id
+                ]);
+
+                // Wysyłamy chunk przez WebSocket
+                event(new AssistantUpdatedEvent($message->thread->uuid, [
+                    'steps' => ['processed_ai' => CheckmarkStatus::processing],
+                    'completed' => false,
+                    'message_id' => $message->id,
+                    'content' => $content
+                ]));
+            });
         } catch (\Exception $e) {
             Log::error('Błąd podczas uruchamiania asystenta: ' . $e->getMessage(), [
                 'exception' => $e,
