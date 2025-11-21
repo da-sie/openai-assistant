@@ -20,7 +20,7 @@ trait HandlesAssistantStreaming
         }
     }
 
-    protected function handleStreamedRun(string $threadId, string $assistantId, ?callable $onDelta = null, ?string $instructions = null): void
+    public function handleStreamedRun(string $threadId, string $assistantId, ?callable $onDelta = null, ?string $instructions = null): void
     {
         $this->ensureClient();
 
