@@ -20,17 +20,21 @@ trait HandlesAssistantStreaming
         }
     }
 
-    protected function handleStreamedRun(string $threadId, string $assistantId, ?callable $onDelta = null): void
+    protected function handleStreamedRun(string $threadId, string $assistantId, ?callable $onDelta = null, ?string $instructions = null): void
     {
         $this->ensureClient();
 
         try {
+            $parameters = ['assistant_id' => $assistantId];
+
+            // Użyj przekazanych instrukcji tylko jeśli podano
+            if ($instructions) {
+                $parameters['instructions'] = $instructions;
+            }
+
             $stream = $this->client->threads()->runs()->createStreamed(
                 threadId: $threadId,
-                parameters: [
-                    'assistant_id' => $assistantId,
-                    'instructions' => 'Przeszukaj dostępne pliki, aby znaleźć odpowiedź na pytanie. Odpowiedz tylko na podstawie znalezionych informacji.',
-                ]
+                parameters: $parameters
             );
 
             $fullResponse = '';
@@ -77,10 +81,18 @@ trait HandlesAssistantStreaming
             'thread_id' => $response->threadId,
         ]);
 
+        // Zapisz run_id w wiadomości
+        if ($this->message) {
+            $this->message->openai_run_id = $response->id;
+            $this->message->run_status = 'in_progress';
+            $this->message->saveQuietly();
+        }
+
         event(new AssistantUpdatedEvent($this->uuid, [
             'steps' => ['processed_ai' => CheckmarkStatus::processing],
             'completed' => false,
             'run_id' => $response->id,
+            'message_id' => $this->message?->id,
         ]));
     }
 
@@ -149,6 +161,7 @@ trait HandlesAssistantStreaming
                 'completed' => false,
                 'content' => $content,
                 'is_delta' => true,
+                'message_id' => $this->message?->id,
             ]));
         }
     }
@@ -179,6 +192,7 @@ trait HandlesAssistantStreaming
         event(new AssistantUpdatedEvent($this->uuid, [
             'steps' => ['processed_ai' => CheckmarkStatus::success],
             'completed' => true,
+            'message_id' => $this->message?->id,
         ]));
     }
 
@@ -190,10 +204,17 @@ trait HandlesAssistantStreaming
             'error' => $response->lastError,
         ]);
 
+        // Zaktualizuj status wiadomości
+        if ($this->message) {
+            $this->message->run_status = 'failed';
+            $this->message->saveQuietly();
+        }
+
         event(new AssistantUpdatedEvent($this->uuid, [
             'steps' => ['processed_ai' => CheckmarkStatus::failed],
             'completed' => true,
             'error' => $response->lastError,
+            'message_id' => $this->message?->id,
         ]));
     }
 
@@ -208,6 +229,7 @@ trait HandlesAssistantStreaming
             'steps' => ['processed_ai' => CheckmarkStatus::failed],
             'completed' => true,
             'error' => 'Run został anulowany',
+            'message_id' => $this->message?->id,
         ]));
     }
 
@@ -222,6 +244,7 @@ trait HandlesAssistantStreaming
             'steps' => ['processed_ai' => CheckmarkStatus::failed],
             'completed' => true,
             'error' => 'Run wygasł',
+            'message_id' => $this->message?->id,
         ]));
     }
 

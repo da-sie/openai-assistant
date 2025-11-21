@@ -126,8 +126,8 @@ class Message extends Model
     }
 
     /**
-     * Uruchamia asystenta dla wiadomości
-     * 
+     * Uruchamia asystenta dla wiadomości z prawdziwym streamingiem OpenAI
+     *
      * @param Message $message Wiadomość, dla której uruchamiamy asystenta
      * @return void
      */
@@ -138,61 +138,42 @@ class Message extends Model
             if (!$message->relationLoaded('thread')) {
                 $message->load('thread');
             }
-            
-            // Uruchom asystenta używając metody z modelu Thread
-            ray('Uruchamiam stream');
-            $message->thread->runWithStreaming($message, function($content, $message, $isComplete = false, $error = null) {
-                if ($error) {
-                    ray('Błąd podczas streamowania:', [
-                        'error' => $error->getMessage(),
-                        'message_id' => $message->id
-                    ]);
-                    event(new AssistantUpdatedEvent($message->thread->uuid, [
-                        'steps' => ['processed_ai' => CheckmarkStatus::failed],
-                        'completed' => true,
-                        'message_id' => $message->id,
-                        'error' => $error->getMessage()
-                    ]));
-                    return;
+
+            $thread = $message->thread;
+
+            // Zapisz referencję do wiadomości w thread dla handleStreamedRun
+            $thread->message = $message;
+
+            ray('Uruchamiam prawdziwy streaming OpenAI');
+
+            // Użyj handleStreamedRun z traitu - prawdziwy streaming z OpenAI API
+            $thread->handleStreamedRun(
+                threadId: $thread->openai_thread_id,
+                assistantId: $thread->assistant->openai_assistant_id,
+                onDelta: function ($content) use ($message) {
+                    ray('Delta chunk:', ['content' => $content, 'message_id' => $message->id]);
                 }
+            );
 
-                if ($isComplete) {
-                    ray('Streaming zakończony');
-                    event(new AssistantUpdatedEvent($message->thread->uuid, [
-                        'steps' => ['processed_ai' => CheckmarkStatus::success],
-                        'completed' => true,
-                        'message_id' => $message->id
-                    ]));
-                    return;
-                }
-
-                ray('Otrzymano fragment odpowiedzi:', [
-                    'content' => $content,
-                    'message_id' => $message->id
-                ]);
-
-                // Wysyłamy chunk przez WebSocket
-                event(new AssistantUpdatedEvent($message->thread->uuid, [
-                    'steps' => ['processed_ai' => CheckmarkStatus::processing],
-                    'completed' => false,
-                    'message_id' => $message->id,
-                    'content' => $content
-                ]));
-            });
         } catch (\Exception $e) {
             Log::error('Błąd podczas uruchamiania asystenta: ' . $e->getMessage(), [
                 'exception' => $e,
                 'message_id' => $message->id,
                 'thread_id' => $message->thread_id ?? null,
             ]);
-            
+
             // Aktualizuj status wiadomości
             $message->run_status = self::STATUS_FAILED;
             $message->saveQuietly();
-            
-            // Używamy thread->assistant zamiast this->assistant
-            if ($message->thread && $message->thread->assistant) {
-                event(new AssistantUpdatedEvent($message->thread->assistant->uuid, ['steps' => ['initialized_ai' => CheckmarkStatus::failed]]));
+
+            // Wyślij event o błędzie
+            if ($message->thread) {
+                event(new AssistantUpdatedEvent($message->thread->uuid, [
+                    'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                    'completed' => true,
+                    'message_id' => $message->id,
+                    'error' => $e->getMessage()
+                ]));
             }
         }
     }
