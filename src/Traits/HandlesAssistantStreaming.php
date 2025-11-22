@@ -7,7 +7,7 @@ namespace DaSie\Openaiassistant\Traits;
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use Illuminate\Support\Facades\Log;
-use OpenAI\Responses\Threads\Messages\ThreadMessageDeltaResponse;
+use OpenAI\Responses\Threads\Messages\Delta\ThreadMessageDeltaResponse;
 use OpenAI\Responses\Threads\Messages\ThreadMessageResponse;
 use OpenAI\Responses\Threads\Runs\ThreadRunResponse;
 

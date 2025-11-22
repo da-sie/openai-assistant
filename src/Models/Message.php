@@ -5,6 +5,7 @@ namespace DaSie\Openaiassistant\Models;
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
 use DaSie\Openaiassistant\Jobs\AssistantRequestJob;
+use DaSie\Openaiassistant\Jobs\AssistantStreamJob;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +13,12 @@ use Illuminate\Support\Facades\Log;
 class Message extends Model
 {
     protected $guarded = [];
-    
+
+    /**
+     * Flag to skip auto-running OpenAI on message creation
+     */
+    public static bool $skipAutoRun = false;
+
     /**
      * Statusy przetwarzania wiadomości
      */
@@ -40,17 +46,25 @@ class Message extends Model
     protected static function booted()
     {
         static::created(function ($message) {
+            // Skip auto-run if flag is set
+            if (static::$skipAutoRun) {
+                static::$skipAutoRun = false; // Reset flag
+                return;
+            }
+
             try {
                 // Załaduj relację thread, jeśli nie jest załadowana
                 if (!$message->relationLoaded('thread')) {
                     $message->load('thread');
                 }
-                
+
                 // Utwórz wiadomość w OpenAI
                 $message->createInOpenAI();
-                
-                // Uruchom asystenta
-                self::run($message);
+
+                // Dispatch the streaming job to run in the background
+                // This allows the HTTP request to return immediately
+                // while streaming events are sent via Pusher/WebSocket
+                AssistantStreamJob::dispatch($message->id);
             } catch (\Exception $e) {
                 Log::error('Błąd podczas tworzenia wiadomości: ' . $e->getMessage(), [
                     'exception' => $e,
@@ -68,10 +82,10 @@ class Message extends Model
     
     /**
      * Tworzy wiadomość w OpenAI
-     * 
+     *
      * @return void
      */
-    protected function createInOpenAI(): void
+    public function createInOpenAI(): void
     {
         $client = \OpenAI::client(config('openai.api_key'));
         

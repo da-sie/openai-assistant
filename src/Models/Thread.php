@@ -21,6 +21,11 @@ class Thread extends Model
 
     protected $client;
 
+    /**
+     * Static property to hold initial messages during thread creation
+     */
+    public static array $pendingInitialMessages = [];
+
     public function __construct(array $attributes = [])
     {
         parent::__construct($attributes);
@@ -33,6 +38,9 @@ class Thread extends Model
             try {
                 $assistant = $thread->assistant;
 
+                // Get pending initial messages from static property
+                $initialMessages = static::$pendingInitialMessages;
+
                 Log::info('Próba utworzenia wątku:', [
                     'thread_id' => $thread->id,
                     'assistant' => $assistant ? [
@@ -40,6 +48,7 @@ class Thread extends Model
                         'openai_assistant_id' => $assistant->openai_assistant_id,
                         'name' => $assistant->name,
                     ] : null,
+                    'has_initial_messages' => !empty($initialMessages),
                 ]);
 
                 $client = \OpenAI::client(config('openai.api_key'));
@@ -48,12 +57,14 @@ class Thread extends Model
                     throw new \Exception('Asystent nie jest poprawnie skonfigurowany');
                 }
 
-                // Utwórz wątek w OpenAI
+                // Utwórz wątek w OpenAI z opcjonalnymi wiadomościami początkowymi
                 Log::info('Wysyłanie żądania do OpenAI...');
 
-                $response = $client->threads()->create([
-                    'messages' => [],
-                ]);
+                $threadParams = [
+                    'messages' => $initialMessages ?: [],
+                ];
+
+                $response = $client->threads()->create($threadParams);
 
                 Log::info('Odpowiedź z OpenAI:', [
                     'response' => $response ? json_decode(json_encode($response), true) : null,
@@ -71,6 +82,7 @@ class Thread extends Model
                     'thread_id' => $response->id,
                     'assistant_id' => $assistant->openai_assistant_id,
                     'status' => $thread->status,
+                    'initial_messages_count' => count($initialMessages),
                 ]);
             } catch (\Exception $e) {
                 Log::error('Błąd podczas tworzenia wątku: '.$e->getMessage(), [

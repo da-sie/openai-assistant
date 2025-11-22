@@ -9,12 +9,30 @@ use Illuminate\Support\Str;
 trait WithAssistant
 {
 
-    public function newThread(Assistant $assistant)
+    /**
+     * Creates a new thread for the assistant
+     *
+     * @param Assistant $assistant The assistant to create the thread for
+     * @param array $initialMessages Optional initial messages to include in the thread context
+     *                               Format: [['role' => 'user', 'content' => '...'], ...]
+     * @return Thread
+     */
+    public function newThread(Assistant $assistant, array $initialMessages = [])
     {
-        return $this->threads()->create([
+        // Store initial messages in static property before creating thread
+        if (!empty($initialMessages)) {
+            Thread::$pendingInitialMessages = $initialMessages;
+        }
+
+        $thread = $this->threads()->create([
             'assistant_id' => $assistant->id,
             'uuid' => Str::uuid(),
         ]);
+
+        // Clear the pending messages
+        Thread::$pendingInitialMessages = [];
+
+        return $thread;
     }
 
     public function threads()
