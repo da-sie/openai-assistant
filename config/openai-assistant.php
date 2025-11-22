@@ -15,4 +15,5 @@ return [
         'threads' => 'ai_threads',
         'messages' => 'ai_messages',
     ],
+    'queue' => env('OPENAI_ASSISTANT_QUEUE', 'default'),
 ];

@@ -22,8 +22,7 @@ class AssistantStreamJob implements ShouldQueue
 
     public function __construct(private int $messageId)
     {
-        // Use high priority queue for faster processing
-        $this->onQueue('default');
+        $this->onQueue(config('openai-assistant.queue', 'default'));
     }
 
     public function handle(): void

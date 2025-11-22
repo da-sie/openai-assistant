@@ -15,6 +15,7 @@ class AssistantRequestJob implements ShouldQueue
 
     public function __construct(private $messageId)
     {
+        $this->onQueue(config('openai-assistant.queue', 'default'));
     }
 
     public function handle(): void
