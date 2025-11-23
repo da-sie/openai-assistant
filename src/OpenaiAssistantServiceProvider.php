@@ -61,16 +61,11 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
             ->hasMigrations([
                 'create_openai_assistant_table',
                 'userable_openai_assistant_table',
+            ])
+            ->hasCommands([
+                OpenaiAssistantCommand::class,
+                SyncToolsCommand::class,
             ]);
-
-        // Register commands
-        if (class_exists(OpenaiAssistantCommand::class)) {
-            $package->hasCommand(OpenaiAssistantCommand::class);
-        }
-
-        if (class_exists(SyncToolsCommand::class)) {
-            $package->hasCommand(SyncToolsCommand::class);
-        }
     }
 
     /**
