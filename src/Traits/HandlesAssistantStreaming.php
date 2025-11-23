@@ -163,8 +163,9 @@ trait HandlesAssistantStreaming
                 'outputs_count' => count($toolOutputs),
             ]);
 
-            // Submit tool outputs back to OpenAI
-            $this->client->threads()->runs()->submitToolOutputs(
+            // Submit tool outputs back to OpenAI using STREAMED version
+            // to continue receiving the assistant's response
+            $toolStream = $this->client->threads()->runs()->submitToolOutputsStreamed(
                 threadId: $response->threadId,
                 runId: $response->id,
                 parameters: [
@@ -172,9 +173,25 @@ trait HandlesAssistantStreaming
                 ]
             );
 
-            Log::info('Tool outputs wysłane do OpenAI', [
+            Log::info('Tool outputs wysłane do OpenAI (streaming)', [
                 'run_id' => $response->id,
             ]);
+
+            // Process the continuation stream to get the assistant's response
+            $fullResponse = '';
+            foreach ($toolStream as $toolResponse) {
+                match ($toolResponse->event) {
+                    'thread.run.in_progress' => $this->handleRunInProgress($toolResponse->response),
+                    'thread.run.requires_action' => $this->handleRunRequiresAction($toolResponse->response),
+                    'thread.message.created' => $this->handleMessageCreated($toolResponse->response),
+                    'thread.message.in_progress' => $this->handleMessageInProgress($toolResponse->response),
+                    'thread.message.delta' => $this->handleMessageDelta($toolResponse->response, null, $fullResponse),
+                    'thread.message.completed' => $this->handleMessageCompleted($toolResponse->response, $fullResponse),
+                    'thread.run.completed' => $this->handleRunCompleted($toolResponse->response),
+                    'thread.run.failed' => $this->handleRunFailed($toolResponse->response),
+                    default => null,
+                };
+            }
         } catch (\Exception $e) {
             Log::error('Błąd podczas przetwarzania tool calls w streaming', [
                 'run_id' => $response->id,
