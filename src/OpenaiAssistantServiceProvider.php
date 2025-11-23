@@ -11,29 +11,12 @@ use Spatie\LaravelPackageTools\PackageServiceProvider;
 class OpenaiAssistantServiceProvider extends PackageServiceProvider
 {
     /**
-     * Bootstrap the application services.
-     */
-    public function boot()
-    {
-        // Publikowanie konfiguracji
-        $this->publishes([
-            __DIR__.'/../config/openai-assistant.php' => config_path('openai-assistant.php'),
-        ], 'openai-assistant-config');
-
-        // Publikowanie migracji
-        $this->publishes([
-            __DIR__.'/../database/migrations/' => database_path('migrations'),
-        ], 'openai-assistant-migrations');
-
-        // Ładowanie migracji
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-    }
-
-    /**
      * Register the application services.
      */
     public function register()
     {
+        parent::register();
+
         // Łączenie konfiguracji
         $this->mergeConfigFrom(
             __DIR__.'/../config/openai-assistant.php', 'openai-assistant'
@@ -73,6 +56,19 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
      */
     public function packageBooted()
     {
+        // Publikowanie konfiguracji
+        $this->publishes([
+            __DIR__.'/../config/openai-assistant.php' => config_path('openai-assistant.php'),
+        ], 'openai-assistant-config');
+
+        // Publikowanie migracji
+        $this->publishes([
+            __DIR__.'/../database/migrations/' => database_path('migrations'),
+        ], 'openai-assistant-migrations');
+
+        // Ładowanie migracji
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
         // Rejestracja EventServiceProvider
         if (class_exists('\DaSie\Openaiassistant\Providers\EventServiceProvider')) {
             $this->app->register(\DaSie\Openaiassistant\Providers\EventServiceProvider::class);
