@@ -4,6 +4,7 @@ namespace DaSie\Openaiassistant\Models;
 
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
+use DaSie\Openaiassistant\Services\ToolCallHandler;
 use DaSie\Openaiassistant\Traits\HandlesAssistantStreaming;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -230,16 +231,21 @@ class Thread extends Model
                     // Obsługa wymaganych akcji narzędzi
                     if ($status === 'requires_action' && isset($run->requiredAction)) {
                         $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
-                        $toolOutputs = [];
 
-                        // Tutaj można dodać logikę obsługi różnych narzędzi
-                        foreach ($toolCalls as $toolCall) {
-                            // Przykładowa implementacja
-                            $toolOutputs[] = [
-                                'tool_call_id' => $toolCall->id,
-                                'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
-                            ];
-                        }
+                        Log::info('Processing tool calls', [
+                            'run_id' => $runId,
+                            'tool_calls_count' => count($toolCalls),
+                            'tool_names' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
+                        ]);
+
+                        // Use ToolCallHandler to process tool calls
+                        $toolHandler = app(ToolCallHandler::class);
+                        $toolOutputs = $toolHandler->handle($toolCalls);
+
+                        Log::info('Tool outputs prepared', [
+                            'run_id' => $runId,
+                            'outputs_count' => count($toolOutputs),
+                        ]);
 
                         // Prześlij wyniki narzędzi
                         $run = $client->threads()->runs()->submitToolOutputs(
@@ -458,22 +464,39 @@ class Thread extends Model
 
                     // Obsługa wymaganych akcji narzędzi
                     if ($status === 'requires_action' && isset($run->requiredAction)) {
+                        $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
+
                         ray('Wymagane akcje narzędzi:', [
-                            'tool_calls' => $run->requiredAction->submitToolOutputs->toolCalls ?? [],
+                            'tool_calls_count' => count($toolCalls),
+                            'tool_names' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
                         ]);
 
-                        $toolCalls = $run->requiredAction->submitToolOutputs->toolCalls ?? [];
-                        $toolOutputs = [];
+                        Log::info('Processing tool calls in streaming mode', [
+                            'run_id' => $runId,
+                            'tool_calls_count' => count($toolCalls),
+                            'tool_names' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
+                        ]);
 
-                        foreach ($toolCalls as $toolCall) {
-                            $toolOutputs[] = [
-                                'tool_call_id' => $toolCall->id,
-                                'output' => json_encode(['result' => 'Przykładowa odpowiedź narzędzia']),
-                            ];
-                        }
+                        // Emit event to notify frontend about tool processing
+                        event(new AssistantUpdatedEvent($this->uuid, [
+                            'steps' => ['processed_ai' => CheckmarkStatus::processing],
+                            'completed' => false,
+                            'message_id' => $message->id,
+                            'tool_calls' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
+                            'is_processing_tools' => true,
+                        ]));
+
+                        // Use ToolCallHandler to process tool calls
+                        $toolHandler = app(ToolCallHandler::class);
+                        $toolOutputs = $toolHandler->handle($toolCalls);
 
                         ray('Wysyłam wyniki narzędzi:', [
-                            'tool_outputs' => $toolOutputs,
+                            'tool_outputs_count' => count($toolOutputs),
+                        ]);
+
+                        Log::info('Tool outputs prepared for streaming', [
+                            'run_id' => $runId,
+                            'outputs_count' => count($toolOutputs),
                         ]);
 
                         $run = $client->threads()->runs()->submitToolOutputs(

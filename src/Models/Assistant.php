@@ -35,11 +35,13 @@ class Assistant extends Model
 
                 // Sprawdzamy, czy openai_assistant_id istnieje
                 if (!empty($assistant->openai_assistant_id)) {
+                    $tools = static::buildTools($assistant->tools);
+
                     $client->assistants()->modify($assistant->openai_assistant_id, [
                         'name' => $assistant->name,
                         'instructions' => $assistant->instructions,
                         'model' => $assistant->engine,
-                        'tools' => $assistant->tools ?? [['type' => 'file_search']],
+                        'tools' => $tools,
                     ]);
                     // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
                 } else {
@@ -70,19 +72,23 @@ class Assistant extends Model
         static::created(function ($assistant) {
             try {
                 $client = \OpenAI::client(config('openai.api_key'));
+
+                $tools = static::buildTools($assistant->tools);
+
                 $assistantModel = $client->assistants()->create([
                     'instructions' => $assistant->instructions,
                     'name' => $assistant->name,
-                    'tools' => [
-                        [
-                            'type' => 'file_search',
-                        ],
-                    ],
+                    'tools' => $tools,
                     'model' => $assistant->engine,
                 ]);
 
                 $assistant->openai_assistant_id = $assistantModel->id;
                 $assistant->saveQuietly();
+
+                Log::info('Assistant created with tools', [
+                    'assistant_id' => $assistantModel->id,
+                    'tools_count' => count($tools),
+                ]);
                 // event(new AssistantUpdatedEvent($assistant->id, ['steps' => ['initialized_ai' => CheckmarkStatus::success]]));
             } catch (\Exception $e) {
                 Log::error('Błąd podczas tworzenia asystenta w OpenAI: ' . $e->getMessage());
@@ -90,6 +96,108 @@ class Assistant extends Model
                 throw $e;
             }
         });
+    }
+
+    /**
+     * Build tools array combining file_search and configured function tools
+     *
+     * @param array|null $customTools Custom tools from model
+     * @return array
+     */
+    protected static function buildTools(?array $customTools = null): array
+    {
+        // Start with file_search
+        $tools = [
+            ['type' => 'file_search'],
+        ];
+
+        // Add configured function tools from config
+        $configuredTools = config('openai-assistant.tools', []);
+        foreach ($configuredTools as $tool) {
+            $tools[] = $tool;
+        }
+
+        // Add any custom tools from the model
+        if (!empty($customTools)) {
+            foreach ($customTools as $tool) {
+                // Avoid duplicates
+                $isDuplicate = false;
+                foreach ($tools as $existingTool) {
+                    if ($existingTool['type'] === $tool['type']) {
+                        if ($tool['type'] === 'function' &&
+                            isset($existingTool['function']['name']) &&
+                            isset($tool['function']['name']) &&
+                            $existingTool['function']['name'] === $tool['function']['name']) {
+                            $isDuplicate = true;
+                            break;
+                        } elseif ($tool['type'] !== 'function') {
+                            $isDuplicate = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!$isDuplicate) {
+                    $tools[] = $tool;
+                }
+            }
+        }
+
+        return $tools;
+    }
+
+    /**
+     * Synchronize tools with OpenAI assistant
+     *
+     * Use this method to update tools on an existing assistant
+     * when you add new tool definitions to the config
+     *
+     * @return bool
+     */
+    public function syncTools(): bool
+    {
+        try {
+            if (empty($this->openai_assistant_id)) {
+                Log::warning('Cannot sync tools - assistant has no OpenAI ID');
+                return false;
+            }
+
+            $client = \OpenAI::client(config('openai.api_key'));
+            $tools = static::buildTools($this->tools);
+
+            $client->assistants()->modify($this->openai_assistant_id, [
+                'tools' => $tools,
+            ]);
+
+            Log::info('Tools synchronized with OpenAI', [
+                'assistant_id' => $this->openai_assistant_id,
+                'tools_count' => count($tools),
+                'tool_names' => array_map(function ($tool) {
+                    if ($tool['type'] === 'function') {
+                        return $tool['function']['name'] ?? 'unnamed';
+                    }
+                    return $tool['type'];
+                }, $tools),
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to sync tools with OpenAI', [
+                'assistant_id' => $this->openai_assistant_id,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Get list of configured tools
+     *
+     * @return array
+     */
+    public function getConfiguredTools(): array
+    {
+        return static::buildTools($this->tools);
     }
 
     public function messages(): HasMany

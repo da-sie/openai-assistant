@@ -2,6 +2,8 @@
 
 namespace DaSie\Openaiassistant\Providers;
 
+use DaSie\Openaiassistant\Commands\SyncToolsCommand;
+use DaSie\Openaiassistant\Services\ToolCallHandler;
 use Spatie\LaravelPackageTools\Commands\InstallCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -15,6 +17,7 @@ class OpenAIAssistantServiceProvider extends PackageServiceProvider
             ->hasConfigFile('openai-assistant')
             ->hasMigration('create_assistant_table')
             ->publishesServiceProvider('EventServiceProvider')
+            ->hasCommand(SyncToolsCommand::class)
             ->hasInstallCommand(function (InstallCommand $command) {
                 $command
                     ->publishConfigFile()
@@ -28,5 +31,10 @@ class OpenAIAssistantServiceProvider extends PackageServiceProvider
     public function packageRegistered()
     {
         $this->app->register(EventServiceProvider::class);
+
+        // Register ToolCallHandler as singleton
+        $this->app->singleton(ToolCallHandler::class, function ($app) {
+            return new ToolCallHandler();
+        });
     }
 }

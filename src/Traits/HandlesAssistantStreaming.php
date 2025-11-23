@@ -6,6 +6,7 @@ namespace DaSie\Openaiassistant\Traits;
 
 use DaSie\Openaiassistant\Enums\CheckmarkStatus;
 use DaSie\Openaiassistant\Events\AssistantUpdatedEvent;
+use DaSie\Openaiassistant\Services\ToolCallHandler;
 use Illuminate\Support\Facades\Log;
 use OpenAI\Responses\Threads\Messages\Delta\ThreadMessageDeltaResponse;
 use OpenAI\Responses\Threads\Messages\ThreadMessageResponse;
@@ -114,11 +115,82 @@ trait HandlesAssistantStreaming
 
     protected function handleRunRequiresAction(ThreadRunResponse $response): void
     {
-        // Tu możemy dodać obsługę narzędzi
-        Log::info('Run wymaga akcji', [
+        $this->ensureClient();
+
+        Log::info('Run wymaga akcji - przetwarzanie tool calls', [
             'run_id' => $response->id,
-            'required_action' => $response->requiredAction,
+            'thread_id' => $response->threadId,
         ]);
+
+        if (!isset($response->requiredAction) || !isset($response->requiredAction->submitToolOutputs)) {
+            Log::warning('Brak wymaganych akcji w odpowiedzi', [
+                'run_id' => $response->id,
+            ]);
+            return;
+        }
+
+        $toolCalls = $response->requiredAction->submitToolOutputs->toolCalls ?? [];
+
+        if (empty($toolCalls)) {
+            Log::warning('Pusta lista tool calls', [
+                'run_id' => $response->id,
+            ]);
+            return;
+        }
+
+        Log::info('Przetwarzanie tool calls w trybie streaming', [
+            'run_id' => $response->id,
+            'tool_calls_count' => count($toolCalls),
+            'tool_names' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
+        ]);
+
+        // Emit event to notify about tool processing
+        event(new AssistantUpdatedEvent($this->uuid, [
+            'steps' => ['processed_ai' => CheckmarkStatus::processing],
+            'completed' => false,
+            'message_id' => $this->message?->id,
+            'tool_calls' => array_map(fn($tc) => $tc->function->name ?? 'unknown', $toolCalls),
+            'is_processing_tools' => true,
+        ]));
+
+        try {
+            // Use ToolCallHandler to process tool calls
+            $toolHandler = app(ToolCallHandler::class);
+            $toolOutputs = $toolHandler->handle($toolCalls);
+
+            Log::info('Tool outputs przygotowane w streaming', [
+                'run_id' => $response->id,
+                'outputs_count' => count($toolOutputs),
+            ]);
+
+            // Submit tool outputs back to OpenAI
+            $this->client->threads()->runs()->submitToolOutputs(
+                threadId: $response->threadId,
+                runId: $response->id,
+                parameters: [
+                    'tool_outputs' => $toolOutputs,
+                ]
+            );
+
+            Log::info('Tool outputs wysłane do OpenAI', [
+                'run_id' => $response->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Błąd podczas przetwarzania tool calls w streaming', [
+                'run_id' => $response->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            event(new AssistantUpdatedEvent($this->uuid, [
+                'steps' => ['processed_ai' => CheckmarkStatus::failed],
+                'completed' => true,
+                'error' => 'Failed to process tool calls: ' . $e->getMessage(),
+                'message_id' => $this->message?->id,
+            ]));
+
+            throw $e;
+        }
     }
 
     protected function handleMessageCreated(ThreadMessageResponse $response): void
