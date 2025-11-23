@@ -2,10 +2,11 @@
 
 namespace DaSie\Openaiassistant;
 
-use Illuminate\Support\ServiceProvider;
+use DaSie\Openaiassistant\Commands\OpenaiAssistantCommand;
+use DaSie\Openaiassistant\Commands\SyncToolsCommand;
+use DaSie\Openaiassistant\Services\ToolCallHandler;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
-use DaSie\Openaiassistant\Commands\OpenaiAssistantCommand;
 
 class OpenaiAssistantServiceProvider extends PackageServiceProvider
 {
@@ -37,6 +38,11 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
         $this->mergeConfigFrom(
             __DIR__.'/../config/openai-assistant.php', 'openai-assistant'
         );
+
+        // Register ToolCallHandler as singleton
+        $this->app->singleton(ToolCallHandler::class, function ($app) {
+            return new ToolCallHandler();
+        });
     }
 
     /**
@@ -56,9 +62,14 @@ class OpenaiAssistantServiceProvider extends PackageServiceProvider
                 'create_openai_assistant_table',
                 'userable_openai_assistant_table',
             ]);
-            
+
+        // Register commands
         if (class_exists(OpenaiAssistantCommand::class)) {
             $package->hasCommand(OpenaiAssistantCommand::class);
+        }
+
+        if (class_exists(SyncToolsCommand::class)) {
+            $package->hasCommand(SyncToolsCommand::class);
         }
     }
 
